@@ -1,9 +1,9 @@
 import axios from "axios";
 
-const NEWS_API_BASE = "https://newsapi.org/v2";
+const THE_NEWS_API_BASE = "https://api.thenewsapi.com/v1";
 
-const MARKET_QUERY =
-  '("S&P 500" OR "Federal Reserve" OR "NASDAQ" OR "tech stocks" OR "interest rates")';
+const MARKET_SEARCH =
+  '"S&P 500" | "Federal Reserve" | "NASDAQ" | "tech stocks" | "interest rates"';
 
 export interface NewsArticle {
   title: string;
@@ -14,16 +14,32 @@ export interface NewsArticle {
   content: string | null;
 }
 
-interface NewsApiArticle {
+interface TheNewsApiArticle {
+  uuid?: string;
   title?: string;
   url?: string;
   description?: string | null;
-  source?: { name?: string };
-  publishedAt?: string;
-  content?: string | null;
+  snippet?: string | null;
+  source?: string;
+  published_at?: string;
+  keywords?: string;
+  categories?: string[];
+  locale?: string;
 }
 
-function mapArticle(raw: NewsApiArticle): NewsArticle | null {
+interface TheNewsApiResponse {
+  data?: TheNewsApiArticle[];
+}
+
+function getApiToken(): string {
+  const token = process.env.THE_NEWS_API_TOKEN;
+  if (!token) {
+    throw new Error("Missing THE_NEWS_API_TOKEN");
+  }
+  return token;
+}
+
+function mapArticle(raw: TheNewsApiArticle): NewsArticle | null {
   if (!raw.title?.trim() || !raw.url?.trim()) {
     return null;
   }
@@ -32,9 +48,9 @@ function mapArticle(raw: NewsApiArticle): NewsArticle | null {
     title: raw.title.trim(),
     url: raw.url.trim(),
     description: raw.description ?? null,
-    source: raw.source?.name ?? "Unknown",
-    publishedAt: raw.publishedAt ?? "",
-    content: raw.content ?? null,
+    source: raw.source ?? "Unknown",
+    publishedAt: raw.published_at ?? "",
+    content: raw.snippet ?? null,
   };
 }
 
@@ -73,35 +89,52 @@ export function dedupeArticles(articles: NewsArticle[]): NewsArticle[] {
   return deduped;
 }
 
-export async function fetchNewsArticles(): Promise<NewsArticle[]> {
-  const apiKey = process.env.NEWS_API_KEY;
-  if (!apiKey) {
-    throw new Error("Missing NEWS_API_KEY");
-  }
-
-  const [usResponse, caResponse, marketResponse] = await Promise.all([
-    axios.get(`${NEWS_API_BASE}/top-headlines`, {
-      params: { country: "us", apiKey },
-    }),
-    axios.get(`${NEWS_API_BASE}/top-headlines`, {
-      params: { country: "ca", apiKey },
-    }),
-    axios.get(`${NEWS_API_BASE}/everything`, {
+async function fetchTopHeadlines(
+  locale: string,
+  apiToken: string,
+): Promise<TheNewsApiArticle[]> {
+  const { data } = await axios.get<TheNewsApiResponse>(
+    `${THE_NEWS_API_BASE}/news/top`,
+    {
       params: {
-        q: MARKET_QUERY,
+        api_token: apiToken,
+        locale,
         language: "en",
-        sortBy: "relevancy",
-        pageSize: 15,
-        apiKey,
+        limit: 10,
       },
-    }),
+    },
+  );
+
+  return data.data ?? [];
+}
+
+async function fetchMarketNews(apiToken: string): Promise<TheNewsApiArticle[]> {
+  const { data } = await axios.get<TheNewsApiResponse>(
+    `${THE_NEWS_API_BASE}/news/all`,
+    {
+      params: {
+        api_token: apiToken,
+        search: MARKET_SEARCH,
+        language: "en",
+        sort: "relevance_score",
+        limit: 15,
+      },
+    },
+  );
+
+  return data.data ?? [];
+}
+
+export async function fetchNewsArticles(): Promise<NewsArticle[]> {
+  const apiToken = getApiToken();
+
+  const [usArticles, caArticles, marketArticles] = await Promise.all([
+    fetchTopHeadlines("us", apiToken),
+    fetchTopHeadlines("ca", apiToken),
+    fetchMarketNews(apiToken),
   ]);
 
-  const combined = [
-    ...(usResponse.data.articles ?? []),
-    ...(caResponse.data.articles ?? []),
-    ...(marketResponse.data.articles ?? []),
-  ] as NewsApiArticle[];
+  const combined = [...usArticles, ...caArticles, ...marketArticles];
 
   const mapped = combined
     .map(mapArticle)

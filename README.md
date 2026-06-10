@@ -10,7 +10,7 @@ User WhatsApp
   → HTTP 200 empty TwiML ack (immediate)
   → after() background job:
       ├── OpenWeatherMap  (Toronto)
-      ├── NewsAPI         (US + CA headlines + market movers)
+      ├── The News API   (US + CA headlines + market movers)
       ├── Gemini 1.5 Flash (curated brief)
       └── Twilio REST API (outbound WhatsApp reply)
 ```
@@ -20,18 +20,18 @@ User WhatsApp
 - **Next.js App Router** (Vercel serverless)
 - **Twilio** — inbound webhook ack + async outbound messages
 - **OpenWeatherMap** — Toronto weather (free tier)
-- **NewsAPI** — US/CA top headlines + S&P/tech market query (free developer tier)
+- **The News API** — US/CA top stories + S&P/tech market search (free tier)
 - **Google Gemini 1.5 Flash** (`@google/generative-ai`) — concise morning brief
 
 ## News pipeline
 
-Three concurrent NewsAPI requests are merged and deduplicated by URL/title:
+Three concurrent The News API requests are merged and deduplicated by URL/title:
 
 | Request | Endpoint | Purpose |
 |---------|----------|---------|
-| A | `top-headlines?country=us` | US headlines |
-| B | `top-headlines?country=ca` | Canada headlines |
-| C | `everything?q=(...)` | S&P 500 / Fed / NASDAQ / tech / rates |
+| A | `GET /v1/news/top?locale=us` | US top stories |
+| B | `GET /v1/news/top?locale=ca` | Canada top stories |
+| C | `GET /v1/news/all?search=...` | S&P 500 / Fed / NASDAQ / tech / rates |
 
 ## Setup
 
@@ -82,13 +82,11 @@ Send **Good morning** to the sandbox number. The endpoint acks immediately; your
 3. Set `TWILIO_WEBHOOK_URL` to `https://<your-vercel-domain>/api/whatsapp`.
 4. Update the Twilio sandbox webhook URL to match.
 
-> **NewsAPI note:** The free developer tier only allows requests from `localhost`. For production you need a paid NewsAPI plan, or run fetches through a proxy during development.
-
 ## Status
 
 - [x] Next.js scaffold + `/api/whatsapp` webhook
 - [x] "Good morning" trigger phrase validation
 - [x] Async ack + outbound Twilio REST reply
 - [x] OpenWeatherMap fetch (Toronto)
-- [x] NewsAPI fetch (US, CA, market movers) with deduplication
+- [x] The News API fetch (US, CA, market movers) with deduplication
 - [x] Gemini 1.5 Flash summarization
