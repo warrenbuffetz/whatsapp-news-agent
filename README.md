@@ -81,12 +81,12 @@ Send **Good morning** to the sandbox number. The endpoint acks immediately; your
 2. In **Project → Settings → General → Build & Development Settings**, confirm:
    - **Framework Preset:** `Next.js`
    - **Build Command:** `npm run build` (or leave default)
-   - **Output Directory:** leave **empty** (do not set `public` — that is for static sites, not Next.js)
+   - **Output Directory:** **turn OFF the override** — the field must be completely blank. Do not type `empty`, `public`, or `.next`; Vercel sets this automatically for Next.js.
 3. Add all variables from `.env.example` in Project → Settings → Environment Variables.
 4. Set `TWILIO_WEBHOOK_URL` to `https://<your-vercel-domain>/api/whatsapp`.
 5. Update the Twilio sandbox webhook URL to match.
 
-> If you see *"No Output Directory named public found"*, the Framework Preset or Output Directory override is wrong. Clear Output Directory and set Framework Preset to Next.js, then redeploy.
+> **Build errors about `public` or `empty` output directory?** The Output Directory override is misconfigured. Disable the override so the field is blank, set Framework Preset to Next.js, then redeploy.
 
 ## Status
 

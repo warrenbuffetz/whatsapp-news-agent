@@ -1,6 +1,59 @@
+import type { NextRequest } from "next/server";
 import twilio from "twilio";
 
 let client: ReturnType<typeof twilio> | null = null;
+
+/**
+ * Resolve the public webhook URL Twilio signed against.
+ * On Vercel, prefer proxy headers over TWILIO_WEBHOOK_URL so a stale ngrok
+ * value in env vars cannot break production signature validation.
+ */
+export function resolveTwilioWebhookUrl(request: NextRequest): string {
+  const { pathname, search } = request.nextUrl;
+
+  const host =
+    request.headers.get("x-forwarded-host")?.split(",")[0]?.trim() ??
+    request.headers.get("host")?.trim();
+
+  const proto =
+    request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim() ??
+    (process.env.VERCEL === "1" ? "https" : "http");
+
+  if (host) {
+    return `${proto}://${host}${pathname}${search}`;
+  }
+
+  const vercelHost = process.env.VERCEL_URL?.trim();
+  if (vercelHost) {
+    return `https://${vercelHost}${pathname}${search}`;
+  }
+
+  const configured = process.env.TWILIO_WEBHOOK_URL?.trim();
+  if (configured) {
+    return configured.replace(/\/$/, "");
+  }
+
+  return request.url;
+}
+
+/**
+ * Parse Twilio's application/x-www-form-urlencoded POST body.
+ */
+export async function parseTwilioParams(
+  request: NextRequest,
+): Promise<Record<string, string>> {
+  const contentType = request.headers.get("content-type") ?? "";
+
+  if (contentType.includes("application/x-www-form-urlencoded")) {
+    const body = await request.text();
+    return Object.fromEntries(new URLSearchParams(body));
+  }
+
+  const formData = await request.formData();
+  return Object.fromEntries(
+    [...formData.entries()].map(([key, value]) => [key, String(value)]),
+  );
+}
 
 /**
  * Lazily initialize the Twilio REST client for outbound WhatsApp messages.
@@ -30,22 +83,44 @@ export function getTwilioWhatsAppFrom(): string {
 
 /**
  * Validate the X-Twilio-Signature header on inbound webhook requests.
+ * Tries the live request URL first, then TWILIO_WEBHOOK_URL as a fallback.
  */
 export function validateTwilioRequest(
-  url: string,
+  request: NextRequest,
   params: Record<string, string>,
   signature: string | null,
 ): boolean {
   const authToken = process.env.TWILIO_AUTH_TOKEN;
-  if (!authToken) {
+  if (!authToken || !signature) {
     return false;
   }
 
-  if (!signature) {
-    return false;
+  const candidates = new Set<string>([
+    resolveTwilioWebhookUrl(request),
+    request.url,
+  ]);
+
+  const configured = process.env.TWILIO_WEBHOOK_URL?.trim();
+  if (configured) {
+    candidates.add(configured.replace(/\/$/, ""));
   }
 
-  return twilio.validateRequest(authToken, signature, url, params);
+  for (const url of candidates) {
+    if (twilio.validateRequest(authToken, signature, url, params)) {
+      return true;
+    }
+
+    // Twilio signs the URL without a trailing slash.
+    const withoutTrailingSlash = url.replace(/\/$/, "");
+    if (
+      withoutTrailingSlash !== url &&
+      twilio.validateRequest(authToken, signature, withoutTrailingSlash, params)
+    ) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 export async function sendWhatsAppMessage(
