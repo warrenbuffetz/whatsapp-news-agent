@@ -17,8 +17,8 @@ const GOOD_MORNING_PATTERN = /^good morning\b/i;
  * Inbound Trigger webhook for Twilio WhatsApp.
  *
  * Fast path: validate, ack immediately with empty TwiML (HTTP 200).
- * Slow path: after() fetches weather + news, summarizes via Gemini,
- * and pushes the brief back via Twilio REST API.
+ * Slow path: after() builds the SOXL brief (same generator as Telegram cron)
+ * and pushes it back via the Twilio REST API.
  */
 export async function POST(request: NextRequest) {
   const params = await parseTwilioParams(request);

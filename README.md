@@ -1,98 +1,107 @@
-# WhatsApp News & Weather Agent
+# WhatsApp / Telegram Market Agents
 
-Serverless **Inbound Trigger** backend for a WhatsApp morning brief bot.
+Serverless apartments on Next.js (Vercel):
 
-## Architecture
+1. **SOXL carbon-copy brief** — WhatsApp on-demand + Telegram morning/night cron  
+2. **Run club coach** — Telegram cron (Tue/Thu/Sat)
+
+## SOXL architecture
 
 ```
-User WhatsApp
-  → Twilio Sandbox (POST /api/whatsapp)
-  → HTTP 200 empty TwiML ack (immediate)
-  → after() background job:
-      ├── OpenWeatherMap  (Toronto)
-      ├── The News API   (US + CA headlines + market movers)
-      ├── Gemini 1.5 Flash (curated brief)
-      └── Twilio REST API (outbound WhatsApp reply)
+Cron (weekday)
+  → GET /api/soxl/morning  (7:00 AM ET / 11:00 UTC EDT)
+  → GET /api/soxl/night    (5:00 PM ET / 21:00 UTC EDT)
+  → Live iShares SOXX holdings + Yahoo/Nasdaq quotes
+  → Finnhub (VIX / P/E / shares / ticker news) + optional TheNewsAPI macro + Reddit
+  → Gemini 2.5 Flash (morning = why up/down; night = wrap + UP/DOWN prediction)
+  → Dedicated SOXL Telegram bot/group (HTML-formatted)
+
+WhatsApp
+  → POST /api/whatsapp ("Good morning")
+  → same SOXL generator (auto morning/night by ET hour)
+  → Twilio outbound (truncated for WhatsApp length)
 ```
 
-## Stack
+## Cron schedules (`vercel.json`)
 
-- **Next.js App Router** (Vercel serverless)
-- **Twilio** — inbound webhook ack + async outbound messages
-- **OpenWeatherMap** — Toronto weather (free tier)
-- **The News API** — US/CA top stories + S&P/tech market search (free tier)
-- **Google Gemini 1.5 Flash** (`@google/generative-ai`) — concise morning brief
+| Path | Schedule | Meaning (EDT) |
+|------|----------|---------------|
+| `/api/run-club` | `0 10 * * 2,4,6` | Tue/Thu/Sat 6:00 AM ET |
+| `/api/soxl/morning` | `0 11 * * 1-5` | Weekdays 7:00 AM ET |
+| `/api/soxl/night` | `0 21 * * 1-5` | Weekdays 5:00 PM ET |
 
-## News pipeline
-
-Three concurrent The News API requests are merged and deduplicated by URL/title:
-
-| Request | Endpoint | Purpose |
-|---------|----------|---------|
-| A | `GET /v1/news/top?locale=us` | US top stories |
-| B | `GET /v1/news/top?locale=ca` | Canada top stories |
-| C | `GET /v1/news/all?search=...` | S&P 500 / Fed / NASDAQ / tech / rates |
+When EST returns (UTC-5), shift UTC hours +1 if you want to keep wall-clock ET times.
 
 ## Setup
 
-1. Install dependencies:
+```bash
+npm install
+cp .env.example .env.local
+# also see lib/soxl/env.example and lib/run-club/env.example
+npm run dev
+```
 
-   ```bash
-   npm install
-   ```
+### Local SOXL smoke
 
-2. Copy environment template and add your API keys:
+```bash
+curl "http://localhost:3000/api/soxl/morning"
+curl "http://localhost:3000/api/soxl/night"
+```
 
-   ```bash
-   cp .env.example .env.local
-   ```
+No `Authorization` header required when `NODE_ENV !== production`.
 
-3. Run locally:
+### Production cron auth
 
-   ```bash
-   npm run dev
-   ```
+Vercel sends `Authorization: Bearer $CRON_SECRET`. Set `CRON_SECRET` in the Vercel dashboard.
 
-4. Expose the webhook for Twilio (local dev):
+### Telegram
 
-   ```bash
-   ngrok http 3000
-   ```
+**Run-club** uses `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`.
 
-   Set your Twilio WhatsApp sandbox **"When a message comes in"** URL to:
+**SOXL** uses a **dedicated** bot and group (no fallback to run-club):
 
-   ```
-   https://<your-ngrok-host>/api/whatsapp
-   ```
+| Variable | Required | Notes |
+|----------|----------|-------|
+| `TELEGRAM_SOXL_BOT_TOKEN` | yes (SOXL cron) | New BotFather HTTP API token |
+| `TELEGRAM_SOXL_CHAT_ID` | yes (SOXL cron) | New group ID (often `-100…`) |
 
-   Also set `TWILIO_WEBHOOK_URL` in `.env.local` to the same URL.
+```bash
+# After adding the bot to the group and sending a message:
+curl "https://api.telegram.org/bot<TELEGRAM_SOXL_BOT_TOKEN>/getUpdates"
+```
 
-## Webhook
+## Env vars (SOXL)
 
-| Method | Path           | Purpose                        |
-|--------|----------------|--------------------------------|
-| POST   | `/api/whatsapp`| Twilio inbound message webhook |
+| Variable | Required | Notes |
+|----------|----------|-------|
+| `GEMINI_API_KEY` | yes | Brief generation (`gemini-2.5-flash`) |
+| `FINNHUB_API_KEY` | recommended | VIX, P/E, shares, ticker-native news |
+| `THE_NEWS_API_TOKEN` | optional | Single macro search per brief (not per-ticker) |
+| `TELEGRAM_SOXL_BOT_TOKEN` | yes (cron) | Dedicated SOXL bot |
+| `TELEGRAM_SOXL_CHAT_ID` | yes (cron) | Dedicated SOXL group |
+| `CRON_SECRET` | yes (prod) | Cron bearer token |
+| Twilio vars | yes (WhatsApp) | On-demand “Good morning” |
 
-Send **Good morning** to the sandbox number. The endpoint acks immediately; your brief arrives via outbound WhatsApp within ~10–30 seconds.
+Holdings are fetched daily (iShares CSV → StockAnalysis via Jina → static JSON fallback). Quotes use Yahoo spark with Nasdaq fallback, then Finnhub fills VIX / ETF metrics. Ticker news comes from Finnhub; TheNewsAPI is at most one macro call. Missing stats are omitted (not printed as “not available”). Reddit may 403; the brief still runs.
+
+**Brief modes**
+- Morning: why SOXL is up/down (momentum) — no prediction
+- Night: full carbon-copy wrap + `Prediction: UP|DOWN`
+
 
 ## Deploy (Vercel)
 
-1. Push to GitHub and import the repo in [Vercel](https://vercel.com).
-2. In **Project → Settings → General → Build & Development Settings**, confirm:
-   - **Framework Preset:** `Next.js`
-   - **Build Command:** `npm run build` (or leave default)
-   - **Output Directory:** **turn OFF the override** — the field must be completely blank. Do not type `empty`, `public`, or `.next`; Vercel sets this automatically for Next.js.
-3. Add all variables from `.env.example` in Project → Settings → Environment Variables.
-4. Set `TWILIO_WEBHOOK_URL` to `https://<your-vercel-domain>/api/whatsapp`.
-5. Update the Twilio sandbox webhook URL to match.
-
-> **Build errors about `public` or `empty` output directory?** The Output Directory override is misconfigured. Disable the override so the field is blank, set Framework Preset to Next.js, then redeploy.
+1. Framework Preset: **Next.js**; Output Directory override **OFF** (blank).
+2. Add env vars from `.env.example` + `lib/soxl/env.example`.
+3. Redeploy so crons register from `vercel.json`.
 
 ## Status
 
-- [x] Next.js scaffold + `/api/whatsapp` webhook
-- [x] "Good morning" trigger phrase validation
-- [x] Async ack + outbound Twilio REST reply
-- [x] OpenWeatherMap fetch (Toronto)
-- [x] The News API fetch (US, CA, market movers) with deduplication
-- [x] Gemini 1.5 Flash summarization
+- [x] SOXL holdings + impact math (weight × day% × ~3x)
+- [x] Yahoo/Nasdaq quotes + Finnhub VIX / fundamentals merge
+- [x] Finnhub ticker news + optional TheNewsAPI macro (1 call)
+- [x] Reddit sentiment (r/SOXL, semis, stocks, WSB)
+- [x] Gemini brief (no EOY footer) + night prediction
+- [x] Telegram HTML formatting (impact in monospace)
+- [x] WhatsApp “Good morning” → SOXL brief
+- [x] Run club apartment (unchanged)

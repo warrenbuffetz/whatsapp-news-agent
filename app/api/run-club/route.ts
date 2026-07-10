@@ -6,6 +6,8 @@ import { fetchRunWeather } from "@/lib/run-club/weather";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
+const RUN_CITY = "Toronto";
+
 /**
  * Weekly run schedule (Eastern Time club calendar).
  * Tuesday = tempo, Thursday = recovery, Saturday = long run.
@@ -30,21 +32,6 @@ function getEasternDayOfWeek(): number {
   return eastern.getDay();
 }
 
-function isAuthorizedCron(request: NextRequest): boolean {
-  if (process.env.NODE_ENV !== "production") {
-    return true;
-  }
-
-  const cronSecret = process.env.CRON_SECRET;
-  if (!cronSecret) {
-    console.error("[run-club] CRON_SECRET is not configured");
-    return false;
-  }
-
-  const authHeader = request.headers.get("authorization");
-  return authHeader === `Bearer ${cronSecret}`;
-}
-
 /**
  * The Anti-Excuse Running Weather Dial — isolated run-club apartment.
  * GET /api/run-club
@@ -52,13 +39,31 @@ function isAuthorizedCron(request: NextRequest): boolean {
  * Triggered by Vercel Cron Tue/Thu/Sat 6:00 AM Eastern (10:00 UTC during EDT).
  */
 export async function GET(request: NextRequest) {
-  if (!isAuthorizedCron(request)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (process.env.NODE_ENV === "production") {
+    const cronSecret = process.env.CRON_SECRET;
+
+    if (!cronSecret) {
+      console.error(
+        "CRON_SECRET is missing from production environment variables",
+      );
+      return NextResponse.json(
+        {
+          error:
+            "CRON_SECRET is missing from production environment variables",
+        },
+        { status: 500 },
+      );
+    }
+
+    const authHeader = request.headers.get("authorization");
+    if (authHeader !== `Bearer ${cronSecret}`) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
   }
 
   try {
     const runGoal = getWeeklyRunGoal(getEasternDayOfWeek());
-    const weather = await fetchRunWeather();
+    const weather = await fetchRunWeather(RUN_CITY);
     const message = await generateCoachMessage(weather, runGoal);
 
     await sendTelegramMessage(message);

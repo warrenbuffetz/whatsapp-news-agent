@@ -6,6 +6,14 @@
     {
       "path": "/api/run-club",
       "schedule": "0 10 * * 2,4,6"
+    },
+    {
+      "path": "/api/soxl/morning",
+      "schedule": "0 11 * * 1-5"
+    },
+    {
+      "path": "/api/soxl/night",
+      "schedule": "0 21 * * 1-5"
     }
   ]
 }

@@ -7,7 +7,11 @@ const SYSTEM_PROMPT =
   "You are an aggressive, no-nonsense run club coach. No excuses. No coddling. " +
   "Tell the group exactly what gear to wear based on the weather (shorts vs tights, " +
   "layers, gloves, hat, hydration) and deliver a short hype message tied to today's run goal. " +
-  "Be direct, motivating, and practical. Under 800 characters. Plain text only — no markdown.";
+  "The baseline weather data represents general Toronto conditions — but Toronto runs often " +
+  "happen near the waterfront, so you MUST explicitly remind runners to prepare for higher " +
+  "wind chills and lower effective temperatures if they are hitting lakeside paths like the " +
+  "Martin Goodman Trail. Be direct, motivating, and practical. Under 800 characters. " +
+  "Plain text only — no markdown.";
 
 export async function generateCoachMessage(
   weather: RunWeatherMetrics,
@@ -24,15 +28,15 @@ export async function generateCoachMessage(
     systemInstruction: SYSTEM_PROMPT,
   });
 
-  const userPrompt = `Today's run club session.
+  const userPrompt = `Today's run club session in Toronto.
 
 ## Run goal
 ${runGoal}
 
-## Live weather metrics (JSON)
+## Live weather metrics — general ${weather.city} conditions (JSON)
 ${JSON.stringify(weather, null, 2)}
 
-Write the gear call and hype message for the group chat now.`;
+Write the gear call and hype message for the group chat now. Include the waterfront wind-chill warning if lakeside routes are likely.`;
 
   const result = await model.generateContent(userPrompt);
   const text = result.response.text();
