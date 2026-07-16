@@ -20,3 +20,7 @@
 - Append code playbooks (up/down scenarios) + concentration/relative strength/events; log night calls for hit-rate scorekeeping (call-log.json + /tmp on serverless).
 - Gemini: retry 429 with capped backoff; on daily quota exhaustion use code-only fallback brief (do not wait out the day). Finnhub: retry 429/503 up to 3×.
 
+## Vercel serverless (60s cap)
+- Do not hard-skip data sources on Vercel — use tiered fallbacks (Finnhub → Yahoo gaps → capped Nasdaq for priority symbols) and a pipeline time budget.
+- Holdings: race iShares + StockAnalysis in parallel before static JSON; prefer iShares weights when both succeed.
+- Log `dataQuality` (quoteCoveragePct, holdingsSource, extendedHours) in cron JSON so degraded runs are visible.

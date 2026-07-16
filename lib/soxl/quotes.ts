@@ -6,7 +6,7 @@ import {
   hasFinnhub,
   type FinnhubQuote,
 } from "@/lib/soxl/finnhub";
-import { isVercelRuntime } from "@/lib/soxl/runtime";
+import { isVercelRuntime, hasPipelineBudget } from "@/lib/soxl/runtime";
 
 export interface QuoteSnapshot {
   symbol: string;
@@ -68,9 +68,12 @@ interface SparkSymbol {
   previousClose?: number | null;
 }
 
+const PRIORITY_QUOTE_SYMBOLS = ["SOXL", "SOXX", "^VIX", "SMH", "QQQ"];
+
 async function fetchSparkBatch(
   symbols: string[],
   attempt = 1,
+  maxAttempts = 3,
 ): Promise<Map<string, QuoteSnapshot> | null> {
   const joined = symbols.map(encodeURIComponent).join(",");
   const url =
@@ -134,9 +137,9 @@ async function fetchSparkBatch(
     return hits > 0 ? map : null;
   } catch (error) {
     const status = axios.isAxiosError(error) ? error.response?.status : null;
-    if ((status === 429 || status === 503) && attempt < 3) {
+    if ((status === 429 || status === 503) && attempt < maxAttempts) {
       await sleep(800 * attempt);
-      return fetchSparkBatch(symbols, attempt + 1);
+      return fetchSparkBatch(symbols, attempt + 1, maxAttempts);
     }
     console.error("[soxl/quotes] spark batch failed", status ?? error);
     return null;
@@ -230,67 +233,128 @@ function finnhubToSnapshot(q: FinnhubQuote): QuoteSnapshot {
   };
 }
 
+function mergeQuote(base: QuoteSnapshot, patch: QuoteSnapshot): QuoteSnapshot {
+  return {
+    symbol: base.symbol,
+    price: base.price ?? patch.price,
+    previousClose: base.previousClose ?? patch.previousClose,
+    dayChangePct: base.dayChangePct ?? patch.dayChangePct,
+    extendedChangePct: base.extendedChangePct ?? patch.extendedChangePct,
+    marketState: base.marketState ?? patch.marketState,
+    shortPercentOfFloat:
+      base.shortPercentOfFloat ?? patch.shortPercentOfFloat,
+    sharesOutstanding: base.sharesOutstanding ?? patch.sharesOutstanding,
+    regularMarketVolume:
+      base.regularMarketVolume ?? patch.regularMarketVolume,
+  };
+}
+
+function prioritizeQuoteSymbols(missing: string[]): string[] {
+  const priority = PRIORITY_QUOTE_SYMBOLS.filter((s) => missing.includes(s));
+  const rest = missing.filter((s) => !priority.includes(s));
+  return [...priority, ...rest];
+}
+
+async function fillFromYahooSpark(
+  map: Map<string, QuoteSnapshot>,
+  missing: string[],
+): Promise<void> {
+  if (!missing.length) return;
+
+  const chunkSize = 15;
+  const maxAttempts = isVercelRuntime() ? 1 : 3;
+  const unique = [...new Set(missing)];
+
+  for (let i = 0; i < unique.length; i += chunkSize) {
+    if (isVercelRuntime() && !hasPipelineBudget(4_000)) {
+      console.warn("[soxl/quotes] skipping Yahoo gap-fill — low time budget");
+      break;
+    }
+
+    const chunk = unique.slice(i, i + chunkSize);
+    const batch = await fetchSparkBatch(chunk, 1, maxAttempts);
+    if (!batch) continue;
+
+    for (const [symbol, quote] of batch) {
+      if (quote.dayChangePct == null && quote.price == null) continue;
+      const existing = map.get(symbol) ?? emptyQuote(symbol);
+      map.set(symbol, mergeQuote(existing, quote));
+    }
+
+    if (i + chunkSize < unique.length && !isVercelRuntime()) {
+      await sleep(200);
+    }
+  }
+}
+
+function logQuoteCoverage(
+  map: Map<string, QuoteSnapshot>,
+  symbols: string[],
+  label: string,
+): void {
+  const withDayPct = symbols.filter(
+    (s) => map.get(s)?.dayChangePct != null,
+  ).length;
+  console.log(`[soxl/quotes] ${label}`, {
+    requested: symbols.length,
+    withDayPct,
+    coveragePct: Number(((withDayPct / symbols.length) * 100).toFixed(1)),
+  });
+}
+
 export async function fetchQuotes(
   symbols: string[],
 ): Promise<Map<string, QuoteSnapshot>> {
-  // Vercel datacenter IPs get Yahoo 429 + slow Nasdaq; Finnhub is reliable here.
-  if (hasFinnhub() && isVercelRuntime()) {
+  const map = new Map<string, QuoteSnapshot>();
+
+  // Tier 1 — Finnhub (reliable from datacenter IPs; same data as institutional feeds).
+  if (hasFinnhub()) {
     const finnhub = await fetchFinnhubQuotesBatch(symbols);
-    const map = new Map<string, QuoteSnapshot>();
     for (const symbol of symbols) {
       const q = finnhub.get(symbol);
       map.set(symbol, q ? finnhubToSnapshot(q) : emptyQuote(symbol));
     }
-    console.log("[soxl/quotes] Finnhub batch (Vercel)", {
-      requested: symbols.length,
-      withDayPct: [...map.values()].filter((q) => q.dayChangePct != null).length,
-    });
-    return map;
+    logQuoteCoverage(map, symbols, "after Finnhub");
   }
 
-  const map = new Map<string, QuoteSnapshot>();
-  const chunkSize = 15;
-  const missing: string[] = [];
+  let missing = symbols.filter((s) => map.get(s)?.dayChangePct == null);
 
-  for (let i = 0; i < symbols.length; i += chunkSize) {
-    const chunk = symbols.slice(i, i + chunkSize);
-    const batch = await fetchSparkBatch(chunk);
-    if (batch) {
-      for (const [symbol, quote] of batch) {
-        map.set(symbol, quote);
-        if (quote.dayChangePct == null) missing.push(symbol);
-      }
-    } else {
-      missing.push(...chunk);
-    }
-    if (i + chunkSize < symbols.length) {
-      await sleep(200);
-    }
-  }
-
+  // Tier 2 — Yahoo spark for gaps (fast batch when not rate-limited).
   if (missing.length) {
-    if (isVercelRuntime()) {
+    await fillFromYahooSpark(map, missing);
+    missing = symbols.filter((s) => map.get(s)?.dayChangePct == null);
+  }
+
+  // Tier 3 — Nasdaq for priority symbols only on Vercel (full batch locally).
+  if (missing.length) {
+    const prioritized = prioritizeQuoteSymbols(missing);
+    const cap = isVercelRuntime()
+      ? Math.min(prioritized.length, hasPipelineBudget(10_000) ? 12 : 6)
+      : prioritized.length;
+
+    if (cap > 0) {
+      const toFetch = prioritized.slice(0, cap);
       console.warn(
-        `[soxl/quotes] ${missing.length} symbols missing day % — skipping Nasdaq on Vercel`,
+        `[soxl/quotes] Nasdaq gap-fill for ${toFetch.length}/${missing.length} symbols`,
       );
-    } else {
-      console.warn(
-        `[soxl/quotes] falling back to Nasdaq for ${missing.length} symbols`,
-      );
-      const fallback = await fetchNasdaqBatch([...new Set(missing)]);
+      const fallback = await fetchNasdaqBatch(toFetch);
       for (const [symbol, quote] of fallback) {
-        if (quote.dayChangePct != null || quote.price != null) {
-          map.set(symbol, quote);
-        } else if (!map.has(symbol)) {
-          map.set(symbol, quote);
-        }
+        if (quote.dayChangePct == null && quote.price == null) continue;
+        const existing = map.get(symbol) ?? emptyQuote(symbol);
+        map.set(symbol, mergeQuote(existing, quote));
       }
+      missing = symbols.filter((s) => map.get(s)?.dayChangePct == null);
     }
   }
 
   for (const symbol of symbols) {
     if (!map.has(symbol)) map.set(symbol, emptyQuote(symbol));
   }
+
+  if (missing.length) {
+    console.warn("[soxl/quotes] symbols still missing day %", missing.slice(0, 15));
+  }
+  logQuoteCoverage(map, symbols, "final");
 
   return map;
 }
@@ -317,9 +381,13 @@ export async function fetchMarketQuotes(tickers: string[]): Promise<{
   soxx = enriched.soxx;
   vix = enriched.vix;
 
-  // Extended-hours Yahoo often 429s from Vercel; skip to save budget.
-  if (!isVercelRuntime()) {
-    const extended = await fetchExtendedChanges(["SOXL", "SOXX"]);
+  // Extended-hours: best-effort with short timeout so morning gap context is preserved.
+  if (!isVercelRuntime() || hasPipelineBudget(5_000)) {
+    const timeoutMs = isVercelRuntime() ? 4_000 : 12_000;
+    const extended = await Promise.race([
+      fetchExtendedChanges(["SOXL", "SOXX"]),
+      sleep(timeoutMs).then(() => new Map<string, number | null>()),
+    ]);
     if (extended.get("SOXL") != null) {
       soxl = { ...soxl, extendedChangePct: extended.get("SOXL") ?? null };
     }

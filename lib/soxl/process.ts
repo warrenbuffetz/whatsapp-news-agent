@@ -20,6 +20,14 @@ import {
 } from "@/lib/soxl/call-log";
 import { todayEtIso } from "@/lib/soxl/market-calendar";
 import type { SessionActivity } from "@/lib/soxl/session-activity";
+import {
+  buildQuoteCoverage,
+  type DataQualityReport,
+} from "@/lib/soxl/data-quality";
+import {
+  pipelineElapsedMs,
+  startPipelineBudget,
+} from "@/lib/soxl/runtime";
 
 export interface SoXlBriefResult {
   mode: SoXlBriefMode;
@@ -34,6 +42,7 @@ export interface SoXlBriefResult {
   call?: "UP" | "DOWN" | null;
   callLogRecorded?: boolean;
   usedFallback?: boolean;
+  dataQuality?: DataQualityReport;
 }
 
 function resolveMode(mode: SoXlBriefMode): "morning" | "night" {
@@ -52,13 +61,13 @@ function resolveMode(mode: SoXlBriefMode): "morning" | "night" {
 export async function buildSoXlBrief(
   mode: SoXlBriefMode = "auto",
 ): Promise<SoXlBriefResult> {
+  startPipelineBudget();
   const resolved = resolveMode(mode);
 
   const holdingsResult = await fetchSoxxHoldings();
   const holdings = holdingsResult.holdings;
   const tickers = holdings.map((h) => h.ticker);
 
-  // Stagger bursts: quotes first, then news/sentiment/events in parallel.
   const market = await fetchMarketQuotes(tickers);
   const [macroNews, sentiment, events, callLogEntries] = await Promise.all([
     fetchMacroNews(),
@@ -125,6 +134,37 @@ export async function buildSoXlBrief(
     }
   }
 
+  const allQuoteSymbols = [...tickers, "SOXL", "SOXX", "^VIX", "SMH", "QQQ"];
+  const quoteMap = new Map<string, { dayChangePct: number | null }>();
+  for (const t of tickers) {
+    const q = market.holdings.get(t);
+    quoteMap.set(t, { dayChangePct: q?.dayChangePct ?? null });
+  }
+  quoteMap.set("SOXL", { dayChangePct: market.soxl.dayChangePct });
+  quoteMap.set("SOXX", { dayChangePct: market.soxx.dayChangePct });
+  quoteMap.set("^VIX", { dayChangePct: market.vix.dayChangePct });
+  quoteMap.set("SMH", { dayChangePct: market.smh.dayChangePct });
+  quoteMap.set("QQQ", { dayChangePct: market.qqq.dayChangePct });
+
+  const quoteCoverage = buildQuoteCoverage(allQuoteSymbols, quoteMap);
+  const holdingCoverage = buildQuoteCoverage(tickers, market.holdings);
+
+  const dataQuality: DataQualityReport = {
+    holdingsSource: holdingsResult.source,
+    holdingsAsOf: holdingsResult.asOf,
+    holdingsCount: holdings.length,
+    ...quoteCoverage,
+    extendedHours:
+      market.soxl.extendedChangePct != null ||
+      market.soxx.extendedChangePct != null,
+    pipelineMs: pipelineElapsedMs(),
+  };
+
+  // Warn if impact math may be thin — top/bottom names need day % for accuracy.
+  if (holdingCoverage.quoteCoveragePct < 85) {
+    console.warn("[soxl] low holding quote coverage", holdingCoverage);
+  }
+
   return {
     mode: resolved,
     text: generated.text,
@@ -138,5 +178,6 @@ export async function buildSoXlBrief(
     call: generated.call,
     callLogRecorded,
     usedFallback: generated.usedFallback,
+    dataQuality,
   };
 }

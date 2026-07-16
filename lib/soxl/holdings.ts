@@ -202,9 +202,9 @@ async function fetchFromIshares(timeoutMs = 25_000): Promise<SoxxHoldingsResult>
   };
 }
 
-async function fetchFromStockAnalysis(): Promise<SoxxHoldingsResult> {
+async function fetchFromStockAnalysis(timeoutMs = 45_000): Promise<SoxxHoldingsResult> {
   const { data } = await axios.get<string>(JINA_STOCKANALYSIS_URL, {
-    timeout: 45_000,
+    timeout: timeoutMs,
     responseType: "text",
     transformResponse: [(d) => d],
     headers: {
@@ -226,31 +226,63 @@ async function fetchFromStockAnalysis(): Promise<SoxxHoldingsResult> {
   };
 }
 
+function logHoldingsResult(result: SoxxHoldingsResult, label: string): void {
+  console.log(`[soxl/holdings] loaded from ${label}`, {
+    source: result.source,
+    count: result.holdings.length,
+    asOf: result.asOf,
+    top: result.holdings
+      .slice(0, 5)
+      .map((h) => `${h.ticker}:${h.weight}%`),
+  });
+}
+
+/** Prefer iShares (authoritative weights) over StockAnalysis when both succeed. */
+function pickBestHoldingsResult(
+  results: SoxxHoldingsResult[],
+): SoxxHoldingsResult | null {
+  if (!results.length) return null;
+  const rank = { ishares: 0, stockanalysis: 1, fallback: 2 };
+  return [...results].sort(
+    (a, b) => rank[a.source] - rank[b.source] || b.holdings.length - a.holdings.length,
+  )[0];
+}
+
+async function fetchSoxxHoldingsVercel(): Promise<SoxxHoldingsResult> {
+  const attempts = await Promise.allSettled([
+    fetchFromIshares(8_000),
+    fetchFromStockAnalysis(14_000),
+  ]);
+
+  const live: SoxxHoldingsResult[] = [];
+  for (const attempt of attempts) {
+    if (attempt.status === "fulfilled") live.push(attempt.value);
+    else
+      console.warn("[soxl/holdings] live source failed on Vercel", attempt.reason);
+  }
+
+  const best = pickBestHoldingsResult(live);
+  if (best) {
+    logHoldingsResult(best, best.source);
+    return best;
+  }
+
+  console.warn("[soxl/holdings] all live sources failed on Vercel; using static JSON");
+  return {
+    holdings: getSoxxHoldings(),
+    asOf: null,
+    source: "fallback",
+  };
+}
+
 /**
  * Fetch daily-updated SOXX constituent weights.
  * Order: iShares CSV → StockAnalysis (via Jina) → checked-in JSON fallback.
+ * On Vercel both live sources race in parallel (time-capped) before static JSON.
  */
 export async function fetchSoxxHoldings(): Promise<SoxxHoldingsResult> {
-  // Vercel: iShares often bot-walls; StockAnalysis via Jina costs ~10s. Use static JSON fast.
   if (isVercelRuntime()) {
-    try {
-      const result = await fetchFromIshares(5_000);
-      console.log("[soxl/holdings] loaded from iShares (Vercel)", {
-        count: result.holdings.length,
-        asOf: result.asOf,
-      });
-      return result;
-    } catch (isharesError) {
-      console.warn(
-        "[soxl/holdings] iShares failed on Vercel; using static JSON",
-        isharesError,
-      );
-      return {
-        holdings: getSoxxHoldings(),
-        asOf: null,
-        source: "fallback",
-      };
-    }
+    return fetchSoxxHoldingsVercel();
   }
 
   try {

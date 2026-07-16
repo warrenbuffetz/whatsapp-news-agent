@@ -54,6 +54,7 @@ export async function handleSoXlCron(
       holdingsCount: brief.holdingsCount,
       chunks,
       dryRun,
+      dataQuality: brief.dataQuality ?? null,
     });
 
     return NextResponse.json({
@@ -73,6 +74,7 @@ export async function handleSoXlCron(
       call: brief.call ?? null,
       callLogRecorded: brief.callLogRecorded ?? false,
       usedFallback: brief.usedFallback ?? false,
+      dataQuality: brief.dataQuality ?? null,
       hasPrediction:
         /(?:Tomorrow's prediction|Next week's prediction on open|Prediction):\s*(UP|DOWN)/i.test(
           brief.text,
