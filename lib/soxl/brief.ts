@@ -369,7 +369,7 @@ Write the full brief now. No EOY footer. Do not echo section labels like "IMPACT
   });
 
   let cleaned: string;
-  let usedFallback = false;
+  const usedFallback = false;
 
   try {
     const result = await withRetries(

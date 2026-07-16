@@ -284,5 +284,5 @@ export async function fetchFinnhubGeneralNews(
     }))
     .sort((a, b) => Number(b.relevant) - Number(a.relevant));
 
-  return scored.slice(0, limit).map(({ relevant: _, ...rest }) => rest);
+  return scored.slice(0, limit).map(({ relevant: _relevant, ...rest }) => rest);
 }

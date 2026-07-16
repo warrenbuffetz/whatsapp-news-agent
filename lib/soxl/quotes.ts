@@ -271,8 +271,8 @@ export async function fetchMarketQuotes(tickers: string[]): Promise<{
   let soxl = quotes.get("SOXL") ?? emptyQuote("SOXL");
   let soxx = quotes.get("SOXX") ?? emptyQuote("SOXX");
   let vix = quotes.get("^VIX") ?? emptyQuote("^VIX");
-  let smh = quotes.get("SMH") ?? emptyQuote("SMH");
-  let qqq = quotes.get("QQQ") ?? emptyQuote("QQQ");
+  const smh = quotes.get("SMH") ?? emptyQuote("SMH");
+  const qqq = quotes.get("QQQ") ?? emptyQuote("QQQ");
 
   const enriched = await enrichFromFinnhub({ soxl, soxx, vix });
   soxl = enriched.soxl;
