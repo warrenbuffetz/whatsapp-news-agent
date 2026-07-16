@@ -2,8 +2,11 @@ import axios from "axios";
 import {
   fetchFinnhubFundamentalsFor,
   fetchFinnhubQuote,
+  fetchFinnhubQuotesBatch,
   hasFinnhub,
+  type FinnhubQuote,
 } from "@/lib/soxl/finnhub";
+import { isVercelRuntime } from "@/lib/soxl/runtime";
 
 export interface QuoteSnapshot {
   symbol: string;
@@ -213,9 +216,38 @@ async function fetchNasdaqBatch(
   return map;
 }
 
+function finnhubToSnapshot(q: FinnhubQuote): QuoteSnapshot {
+  return {
+    symbol: q.symbol,
+    price: q.price,
+    previousClose: q.previousClose,
+    dayChangePct: q.dayChangePct,
+    extendedChangePct: null,
+    marketState: null,
+    shortPercentOfFloat: null,
+    sharesOutstanding: null,
+    regularMarketVolume: null,
+  };
+}
+
 export async function fetchQuotes(
   symbols: string[],
 ): Promise<Map<string, QuoteSnapshot>> {
+  // Vercel datacenter IPs get Yahoo 429 + slow Nasdaq; Finnhub is reliable here.
+  if (hasFinnhub() && isVercelRuntime()) {
+    const finnhub = await fetchFinnhubQuotesBatch(symbols);
+    const map = new Map<string, QuoteSnapshot>();
+    for (const symbol of symbols) {
+      const q = finnhub.get(symbol);
+      map.set(symbol, q ? finnhubToSnapshot(q) : emptyQuote(symbol));
+    }
+    console.log("[soxl/quotes] Finnhub batch (Vercel)", {
+      requested: symbols.length,
+      withDayPct: [...map.values()].filter((q) => q.dayChangePct != null).length,
+    });
+    return map;
+  }
+
   const map = new Map<string, QuoteSnapshot>();
   const chunkSize = 15;
   const missing: string[] = [];
@@ -237,15 +269,21 @@ export async function fetchQuotes(
   }
 
   if (missing.length) {
-    console.warn(
-      `[soxl/quotes] falling back to Nasdaq for ${missing.length} symbols`,
-    );
-    const fallback = await fetchNasdaqBatch([...new Set(missing)]);
-    for (const [symbol, quote] of fallback) {
-      if (quote.dayChangePct != null || quote.price != null) {
-        map.set(symbol, quote);
-      } else if (!map.has(symbol)) {
-        map.set(symbol, quote);
+    if (isVercelRuntime()) {
+      console.warn(
+        `[soxl/quotes] ${missing.length} symbols missing day % — skipping Nasdaq on Vercel`,
+      );
+    } else {
+      console.warn(
+        `[soxl/quotes] falling back to Nasdaq for ${missing.length} symbols`,
+      );
+      const fallback = await fetchNasdaqBatch([...new Set(missing)]);
+      for (const [symbol, quote] of fallback) {
+        if (quote.dayChangePct != null || quote.price != null) {
+          map.set(symbol, quote);
+        } else if (!map.has(symbol)) {
+          map.set(symbol, quote);
+        }
       }
     }
   }
@@ -279,13 +317,15 @@ export async function fetchMarketQuotes(tickers: string[]): Promise<{
   soxx = enriched.soxx;
   vix = enriched.vix;
 
-  // Extended-hours / pre-market % for gap risk (Yahoo quote).
-  const extended = await fetchExtendedChanges(["SOXL", "SOXX"]);
-  if (extended.get("SOXL") != null) {
-    soxl = { ...soxl, extendedChangePct: extended.get("SOXL") ?? null };
-  }
-  if (extended.get("SOXX") != null) {
-    soxx = { ...soxx, extendedChangePct: extended.get("SOXX") ?? null };
+  // Extended-hours Yahoo often 429s from Vercel; skip to save budget.
+  if (!isVercelRuntime()) {
+    const extended = await fetchExtendedChanges(["SOXL", "SOXX"]);
+    if (extended.get("SOXL") != null) {
+      soxl = { ...soxl, extendedChangePct: extended.get("SOXL") ?? null };
+    }
+    if (extended.get("SOXX") != null) {
+      soxx = { ...soxx, extendedChangePct: extended.get("SOXX") ?? null };
+    }
   }
 
   return {

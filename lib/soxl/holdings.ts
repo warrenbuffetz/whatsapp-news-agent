@@ -1,5 +1,6 @@
 import axios from "axios";
 import fallbackHoldings from "@/lib/soxl/data/soxx-holdings.json";
+import { isVercelRuntime } from "@/lib/soxl/runtime";
 
 export interface SoxxHolding {
   ticker: string;
@@ -175,9 +176,9 @@ function parseStockAnalysisMarkdown(markdown: string): SoxxHolding[] {
   return holdings;
 }
 
-async function fetchFromIshares(): Promise<SoxxHoldingsResult> {
+async function fetchFromIshares(timeoutMs = 25_000): Promise<SoxxHoldingsResult> {
   const { data } = await axios.get<string>(ISHARES_SOXX_CSV, {
-    timeout: 25_000,
+    timeout: timeoutMs,
     responseType: "text",
     transformResponse: [(d) => d],
     headers: {
@@ -230,6 +231,28 @@ async function fetchFromStockAnalysis(): Promise<SoxxHoldingsResult> {
  * Order: iShares CSV → StockAnalysis (via Jina) → checked-in JSON fallback.
  */
 export async function fetchSoxxHoldings(): Promise<SoxxHoldingsResult> {
+  // Vercel: iShares often bot-walls; StockAnalysis via Jina costs ~10s. Use static JSON fast.
+  if (isVercelRuntime()) {
+    try {
+      const result = await fetchFromIshares(5_000);
+      console.log("[soxl/holdings] loaded from iShares (Vercel)", {
+        count: result.holdings.length,
+        asOf: result.asOf,
+      });
+      return result;
+    } catch (isharesError) {
+      console.warn(
+        "[soxl/holdings] iShares failed on Vercel; using static JSON",
+        isharesError,
+      );
+      return {
+        holdings: getSoxxHoldings(),
+        asOf: null,
+        source: "fallback",
+      };
+    }
+  }
+
   try {
     const result = await fetchFromIshares();
     console.log("[soxl/holdings] loaded from iShares", {

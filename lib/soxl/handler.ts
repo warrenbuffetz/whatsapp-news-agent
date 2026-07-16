@@ -11,7 +11,7 @@ function authorizeCron(request: NextRequest): NextResponse | null {
     return null;
   }
 
-  const cronSecret = process.env.CRON_SECRET;
+  const cronSecret = process.env.CRON_SECRET?.trim();
   if (!cronSecret) {
     console.error(
       "CRON_SECRET is missing from production environment variables",
@@ -45,7 +45,7 @@ export async function handleSoXlCron(
     const brief: SoXlBriefResult = await buildSoXlBrief(mode);
     const chunks = dryRun ? 0 : await sendSoXlTelegramMessage(brief.text);
 
-    console.log("[soxl] brief ready", {
+    console.log("[soxl] telegram sent", {
       mode: brief.mode,
       direction: brief.direction,
       soxlDayPct: brief.soxlDayPct,

@@ -146,14 +146,21 @@ export function formatTelegramHtml(text: string): string {
  * Posts to the dedicated SOXL Telegram bot/group.
  * Does not fall back to run-club TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID.
  */
+type TelegramSendResponse = {
+  ok: boolean;
+  description?: string;
+  error_code?: number;
+};
+
 export async function sendSoXlTelegramMessage(text: string): Promise<number> {
   const botToken = getSoXlBotToken();
   const chatId = getSoXlChatId();
   // Chunk plain text first (with page numbers) so HTML tags are never split.
   const chunks = chunkTelegramMessageWithPages(text).map(formatTelegramHtml);
 
-  for (const chunk of chunks) {
-    await axios.post(
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
+    const { data } = await axios.post<TelegramSendResponse>(
       `https://api.telegram.org/bot${botToken}/sendMessage`,
       {
         chat_id: chatId,
@@ -166,6 +173,13 @@ export async function sendSoXlTelegramMessage(text: string): Promise<number> {
         timeout: 20_000,
       },
     );
+
+    if (!data.ok) {
+      const detail = data.description ?? "unknown Telegram error";
+      throw new Error(
+        `Telegram send failed (chunk ${i + 1}/${chunks.length}, code ${data.error_code ?? "?"}): ${detail}`,
+      );
+    }
   }
 
   return chunks.length;

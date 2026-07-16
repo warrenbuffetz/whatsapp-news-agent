@@ -1,4 +1,5 @@
 import axios from "axios";
+import { isVercelRuntime } from "@/lib/soxl/runtime";
 
 const FINNHUB_BASE = "https://finnhub.io/api/v1";
 
@@ -89,6 +90,44 @@ export async function fetchFinnhubQuote(
   };
 }
 
+/** Batch quotes for serverless — avoids slow Yahoo/Nasdaq from datacenter IPs. */
+export async function fetchFinnhubQuotesBatch(
+  symbols: string[],
+): Promise<Map<string, FinnhubQuote>> {
+  const map = new Map<string, FinnhubQuote>();
+  if (!hasFinnhub() || symbols.length === 0) return map;
+
+  const unique = [...new Set(symbols)];
+  const concurrency = isVercelRuntime() ? 10 : 4;
+  const pauseMs = isVercelRuntime() ? 0 : 100;
+
+  for (let i = 0; i < unique.length; i += concurrency) {
+    const batch = unique.slice(i, i + concurrency);
+    const results = await Promise.all(
+      batch.map(async (symbol) => {
+        const candidates =
+          symbol === "^VIX" ? ["^VIX", "VIX"] : [symbol];
+        for (const sym of candidates) {
+          const q = await fetchFinnhubQuote(sym);
+          if (q?.price != null || q?.dayChangePct != null) {
+            return { symbol, quote: { ...q, symbol } };
+          }
+        }
+        return { symbol, quote: null };
+      }),
+    );
+
+    for (const { symbol, quote } of results) {
+      if (quote) map.set(symbol, quote);
+    }
+    if (pauseMs > 0 && i + concurrency < unique.length) {
+      await sleep(pauseMs);
+    }
+  }
+
+  return map;
+}
+
 export interface FinnhubFundamentals {
   ticker: string;
   peRatio: number | null;
@@ -141,7 +180,8 @@ export async function fetchFinnhubFundamentalsFor(
     );
 
     for (const row of results) map.set(row.ticker, row);
-    if (i + concurrency < tickers.length) await sleep(200);
+    const pauseMs = isVercelRuntime() ? 50 : 200;
+    if (i + concurrency < tickers.length) await sleep(pauseMs);
   }
 
   return map;
@@ -216,7 +256,8 @@ export async function fetchFinnhubCompanyNewsCandidates(
     );
 
     for (const row of results) map.set(row.ticker, row.candidates);
-    if (i + concurrency < tickers.length) await sleep(200);
+    const pauseMs = isVercelRuntime() ? 50 : 200;
+    if (i + concurrency < tickers.length) await sleep(pauseMs);
   }
 
   return map;

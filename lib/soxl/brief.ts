@@ -28,6 +28,7 @@ import {
   isRateLimitError,
   withRetries,
 } from "@/lib/soxl/retry";
+import { isVercelRuntime } from "@/lib/soxl/runtime";
 
 export type SoXlBriefMode = "morning" | "night" | "auto";
 
@@ -380,7 +381,7 @@ Write the full brief now. No EOY footer. Do not echo section labels like "IMPACT
         if (!t) throw new Error("Gemini returned an empty SOXL brief");
         return t;
       },
-      { maxAttempts: 3, abortOnDailyQuota: true, maxDelayMs: 10_000 },
+      { maxAttempts: isVercelRuntime() ? 2 : 3, abortOnDailyQuota: true, maxDelayMs: isVercelRuntime() ? 4_000 : 10_000 },
     );
 
     cleaned = result.replace(/\n*SOXL to \$?\d+(?:\.\d+)? EOY\s*$/i, "").trim();
