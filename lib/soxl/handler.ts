@@ -79,7 +79,7 @@ export async function handleSoXlCron(
         /(?:Tomorrow's prediction|Next week's prediction on open|Prediction):\s*(UP|DOWN)/i.test(
           brief.text,
         ),
-      hasPlaybook: /Momentum playbook/i.test(brief.text),
+      hasPlaybook: /What to do|Momentum playbook/i.test(brief.text),
     });
   } catch (error) {
     console.error("[soxl]", error);

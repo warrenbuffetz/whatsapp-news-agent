@@ -206,13 +206,13 @@ export function buildSessionActivity(
 }
 
 export function formatSessionActivityBlock(activity: SessionActivity): string {
-  return `## Session activity (use for swing/risk + action plan + concentration)
+  return `## Session activity (plain English for My Take + prediction)
 ${activity.summaryLine}
-Suggested swing/risk label: ${activity.swingBand}
-Intraday regime (day brief): ${activity.intradayRegime}
-Concentration: top3=${activity.concentration.top3SharePct}% tickers=${activity.concentration.top3Tickers.join(", ")}${activity.concentration.singleNameRisk ? ` — SINGLE-NAME RISK on ${activity.concentration.leaderTicker}` : ""}
-Relative strength: ${activity.relative.summaryLine}
-Rules: calm = small SOXL move; normal = typical 3x day; elevated = notable swing; violent = large move — call out elevated/violent explicitly. If single-name risk, say the move is not a broad semis tape.`;
+Swing: ${activity.swingBand} (calm=small move, violent=huge move — be careful buying)
+Intraday (day brief): ${activity.intradayRegime} (dont_chase/protect = do not buy more into a big move today)
+Concentration: top3=${activity.concentration.top3SharePct}% (${activity.concentration.top3Tickers.join(", ")})${activity.concentration.singleNameRisk ? ` — one stock (${activity.concentration.leaderTicker}) driving much of the move` : ""}
+Relative: ${activity.relative.summaryLine}
+Retail framing: reader already owns SOXL. Recommend SELL, BUY MORE (average down), or HOLD (keep shares for bounce/recovery — especially when prediction is UP).`;
 }
 
 /** Top impact rows by |soxlImpact| for playbook context. */

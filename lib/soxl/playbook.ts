@@ -1,9 +1,42 @@
-import type { SessionActivity } from "@/lib/soxl/session-activity";
+import type { SessionActivity, SwingBand } from "@/lib/soxl/session-activity";
 import type { QuoteSnapshot } from "@/lib/soxl/quotes";
 
+export const PLAYBOOK_HEADER = "What to do — your SOXL position";
+
+function signedPct(n: number | null | undefined): string {
+  if (n == null) return "n/a";
+  return `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
+}
+
+function swingLabel(band: SwingBand): string {
+  switch (band) {
+    case "calm":
+      return "calm (small move)";
+    case "normal":
+      return "normal day";
+    case "elevated":
+      return "elevated (big swing — be careful)";
+    case "violent":
+      return "violent (huge move — extra caution)";
+  }
+}
+
+function regimePlain(regime: SessionActivity["intradayRegime"]): string {
+  switch (regime) {
+    case "quiet":
+      return "quiet session so far";
+    case "normal":
+      return "typical intraday move";
+    case "protect":
+      return "already moved a lot — think before adding";
+    case "dont_chase":
+      return "already moved a lot — be careful buying more today";
+  }
+}
+
 /**
- * Code-generated playbooks — appended to briefs so big-swing guidance
- * is not left to the LLM alone.
+ * Code-generated guide for an existing SOXL holder.
+ * Three actions: SELL | BUY MORE (average down) | HOLD (ride bounce/recovery).
  */
 export function formatMomentumPlaybook(input: {
   mode: "morning" | "night";
@@ -14,65 +47,87 @@ export function formatMomentumPlaybook(input: {
   const band = activity.swingBand;
   const regime = activity.intradayRegime;
   const conc = activity.concentration;
+  const dayPct = signedPct(activity.soxlDayPct);
+  const dayVal = activity.soxlDayPct ?? 0;
   const ah =
     soxl.extendedChangePct != null
-      ? `${soxl.extendedChangePct >= 0 ? "+" : ""}${soxl.extendedChangePct.toFixed(2)}%`
+      ? signedPct(soxl.extendedChangePct)
       : "n/a";
 
-  const lines: string[] = ["Momentum playbook"];
+  const lines: string[] = [
+    PLAYBOOK_HEADER,
+    "You own SOXL. Three moves: SELL (trim or exit) | BUY MORE (average down) | HOLD (keep shares for a bounce/recovery).",
+    "SOXL is 3x leveraged — swings are large. Not financial advice.",
+    "",
+    `Today's tape: ${swingLabel(band)} (SOXL ${dayPct} today). After-hours/pre-market: ${ah}.`,
+  ];
 
   if (conc.singleNameRisk && conc.leaderTicker) {
     lines.push(
-      `Concentration warning: ~${conc.leaderSharePct}% of |impact| from ${conc.leaderTicker} alone — treat as single-name risk, not a broad SOXX tape.`,
+      `Note: much of today's move is ${conc.leaderTicker} — not the whole chip sector equally.`,
     );
-  } else {
+  } else if (conc.top3Tickers.length) {
     lines.push(
-      `Drivers: top-3 impact share ${conc.top3SharePct}% (${conc.top3Tickers.join(", ") || "n/a"}).`,
+      `Main drivers: ${conc.top3Tickers.join(", ")} (${conc.top3SharePct}% of estimated impact).`,
     );
   }
 
-  lines.push(`AH/pre SOXL: ${ah}`);
-
   if (mode === "morning") {
-    lines.push(`Intraday regime: ${regime}`);
-    if (regime === "protect" || regime === "dont_chase") {
+    lines.push("");
+    lines.push(`Before the close (${regimePlain(regime)}):`);
+
+    if (dayVal < -2) {
       lines.push(
-        "Day posture: move is already large — prefer protect / do not chase; only add on confirmed reclaim, not mid-spike FOMO.",
+        "- HOLD: often the best default after a red day if you still believe in semis — wait for a bounce instead of panic-selling.",
       );
+      lines.push("- SELL: if this drawdown is more than you can handle.");
+      lines.push(
+        "- BUY MORE: average down only with planned cash once selling slows.",
+      );
+    } else if (regime === "dont_chase" || band === "violent") {
+      if (dayVal > 0) {
+        lines.push("- HOLD: ride the trend if you're comfortable with 3x swings.");
+        lines.push("- SELL: lock some profit if you want gains off the table.");
+        lines.push("- BUY MORE: skip — don't average up into a huge spike.");
+      } else {
+        lines.push(
+          "- HOLD: reasonable if you expect recovery — don't sell purely on one bad session.",
+        );
+        lines.push("- SELL: valid if you're done with the volatility.");
+        lines.push("- BUY MORE: only with planned dip money, not panic.");
+      }
     } else {
-      lines.push(
-        "Day posture: size normal; use hold/trim/add/stay flat from My Take before EOD.",
-      );
+      lines.push("- HOLD: default if your long-term view is unchanged.");
+      lines.push("- SELL: trim if today's move changed your comfort.");
+      lines.push("- BUY MORE: small add on a dip if you budgeted for it.");
     }
   }
 
-  const needsScenarios =
+  const showScenarios =
     mode === "night" ||
     band === "elevated" ||
     band === "violent" ||
     regime === "protect" ||
     regime === "dont_chase";
 
-  if (needsScenarios) {
-    lines.push("If momentum continues UP hard:");
-    lines.push(
-      "- Trail / scale out into strength; do not max size into a vertical 3x melt-up.",
-    );
-    lines.push(
-      `- Watch ${conc.top3Tickers.slice(0, 2).join(" & ") || "heavyweights"} — if they stall while SOXL rips, fade the extension.`,
-    );
-    lines.push("If momentum flips DOWN hard:");
-    lines.push(
-      "- Cut or hedge quickly; 3x downside accelerates — wait for a reclaim of the morning/open level before re-adding.",
-    );
-    lines.push(
-      `- Invalidation for bulls: heavyweights (${conc.leaderTicker ?? "leaders"}) break session lows on rising volume.`,
-    );
+  if (showScenarios) {
+    lines.push("");
+    lines.push("If SOXL bounces / rips higher next session:");
+    lines.push("- HOLD: keep shares to capture the recovery (matches an UP prediction).");
+    lines.push("- SELL: take profit into strength if you want less exposure.");
+    lines.push("- BUY MORE: usually skip — don't chase a vertical move.");
+
+    lines.push("");
+    lines.push("If SOXL keeps selling off next session:");
+    lines.push("- HOLD: only if you believe it's a dip, not a breakdown.");
+    lines.push("- SELL: reduce or exit if you're done with the pain.");
+    lines.push("- BUY MORE: average down with planned cash after the flush eases.");
   }
 
   if (mode === "night") {
+    lines.push("");
     lines.push(
-      `Next-session bias context: swing=${band}; use with the prediction header — size down when elevated/violent or when AH/pre is already extended.`,
+      "When the prediction is UP after a red day, HOLD is often the lead — let the bounce play out before selling into weakness.",
     );
   }
 

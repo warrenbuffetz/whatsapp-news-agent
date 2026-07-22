@@ -43,8 +43,17 @@ const BLURB_RULES = `Company blurbs (critical — Reddit carbon-copy style):
   using the provided name and role string (e.g. "a bottom-five SOXL-impact name").
 - Reject generic market-wire as news (S&P/Dow movers, roundups, unrelated companies). Those are NONE.`;
 
+const RETAIL_ACTION_RULES = `Retail investor audience (critical):
+- Reader ALREADY OWNS SOXL — this tracker is for managing an existing position.
+- Three actions to recommend: SELL (trim or exit) | BUY MORE (average down) | HOLD (keep shares, ride a expected bounce/recovery).
+- Recommend HOLD when the brief or prediction leans UP / recovery after a dip, or when selling into panic looks worse than waiting — say why in plain English.
+- No options, hedging, margin, shorting, or trader jargon.
+- SOXL is 3x leveraged — remind them on large moves. BUY MORE = planned dip cash only, not panic buying.`;
+
 const SHARED_RULES = `Rules:
 - Plain text only. No markdown fences. No emoji spam.
+- Write in plain English a beginner can act on without a trading desk.
+${RETAIL_ACTION_RULES}
 ${BLURB_RULES}
 - Paste the IMPACT block and OTHER STATS block exactly as provided (do not invent numbers).
 - If a stats line is omitted from OTHER STATS, do not invent or say "not available".
@@ -69,13 +78,16 @@ STRICT FORMAT — use these section headers and order:
 
 7) Paste the OTHER STATS block exactly as provided (may be short).
 
-8) "My Take:" — blunt first-person synthesis that MUST cover:
-   (a) what the tape is doing during the session,
-   (b) whether today's moves/news justify changing stance before EOD — pick one clear posture: hold / trim / add / stay flat — and say why in one or two sentences,
-   (c) if intraday_regime is protect or dont_chase, default toward protect / do not chase (not aggressive adds).
+8) "My Take:" — plain English for someone who already owns SOXL. MUST include:
+   (a) What happened today in one simple sentence (up/down and why, briefly).
+   (b) Three labeled lines — use these headers exactly:
+       "SELL:" when trimming/exiting makes sense (or "SELL: no strong reason today").
+       "BUY MORE:" when averaging down makes sense (or "BUY MORE: wait" if knife-catching / huge spike).
+       "HOLD:" when keeping shares for an expected bounce/recovery is the best fit — especially if semis look oversold or news supports a rebound. Say why.
+   (c) If intraday_regime is protect or dont_chase, lean away from buying more into a huge move.
 
 9) Do NOT include any next-session prediction. No "Tomorrow's prediction", "Next week's prediction", or "Prediction: UP/DOWN".
-10) Do NOT invent a "Momentum playbook" section — it will be appended in code.
+10) Do NOT invent a "What to do" / "Momentum playbook" section — it will be appended in code.
 
 ${SHARED_RULES}`;
 
@@ -97,17 +109,20 @@ STRICT FORMAT — use these section headers and order:
 
 7) Paste the OTHER STATS block exactly as provided (may be short).
 
-8) "My Take:" — blunt first-person synthesis of the closed session.
+8) "My Take:" — plain English for someone who already owns SOXL. Session summary plus:
+   "SELL:" …
+   "BUY MORE:" …
+   "HOLD:" … (keep shares for bounce/recovery when prediction or tape supports it)
 
 9) REQUIRED ending — use this EXACT header line (do not invent a different label):
    "${header}: UP" or "${header}: DOWN"
    then these bullets in order:
-   - swing/risk: calm|normal|elevated|violent — one line why, grounded in the Session activity block (call out elevated/violent clearly when that is the band)
-   - action plan: 1–2 concrete next-session actions (position size bias, what to watch at open, what would invalidate the call). Size down into event-risk dates.
-   - 2–3 short bullets: after-hours/pre-market if any, Reddit/forum sentiment lean, key impact names / heavy weights
+   - swing/risk: calm|normal|elevated|violent — one plain sentence
+   - action plan: three sub-lines — "SELL:", "BUY MORE:", and "HOLD:" for the next session. If prediction is UP after a down day, HOLD should often be the lead option (ride recovery). If DOWN, be honest about SELL vs HOLD vs small BUY MORE on flush.
+   - 2–3 short bullets: after-hours move if any, sentiment lean, which chip names mattered today
 
 Do NOT use a bare "Prediction:" header. Always use "${header}:".
-Do NOT invent a "Momentum playbook" section — it will be appended in code.
+Do NOT invent a "What to do" / "Momentum playbook" section — it will be appended in code.
 
 ${SHARED_RULES}`;
 }
@@ -317,8 +332,8 @@ export async function generateSoXlBrief(
 
   const predictionInstruction =
     mode === "night"
-      ? `End with "${header}: UP" or "${header}: DOWN" (next session kind=${sessionKind}, opens ${sessionDate}), then swing/risk, action plan, and supporting bullets. Suggested swing_band=${activity.swingBand}. Respect event-risk sizing. Call out single-name risk if flagged.`
-      : `Do NOT include any next-session prediction section. Intraday regime=${activity.intradayRegime} — if protect/dont_chase, lean that way in My Take.`;
+      ? `End with "${header}: UP" or "${header}: DOWN" (next session kind=${sessionKind}, opens ${sessionDate}), then swing/risk and action plan with "SELL:", "BUY MORE:", and "HOLD:" for an existing holder. If UP after a red day, favor HOLD (bounce/recovery). Suggested swing_band=${activity.swingBand}.`
+      : `Do NOT include any next-session prediction section. Intraday regime=${activity.intradayRegime} — My Take must use "SELL:", "BUY MORE:", and "HOLD:" (reader already owns SOXL; HOLD when recovery/bounce likely).`;
 
   const sessionBlock = `\n${formatSessionActivityBlock(activity)}\n\n${eventsBlock}\n\n${callLogBlock}\n`;
 
@@ -486,32 +501,64 @@ function buildFallbackBrief(
     "Gemini narrative unavailable (quota/rate-limit) — data-only fallback brief.",
   ].join(" ");
 
-  const posture =
+  const postureHold =
     activity.intradayRegime === "dont_chase" ||
-    activity.intradayRegime === "protect"
-      ? "protect / stay flat"
-      : direction === "up"
-        ? "hold"
-        : direction === "down"
-          ? "hold / trim bias"
-          : "stay flat";
-
-  const myTake =
-    mode === "morning"
-      ? `My Take:\nTape is ${direction} with swing=${activity.swingBand} and intraday_regime=${activity.intradayRegime}. Pre-EOD posture: ${posture}. Re-check heavyweights (${topDrivers}) into the close.`
-      : `My Take:\nSession closed ${direction} (SOXL ${signedPct(payload.impact.soxlActualPct)}, swing=${activity.swingBand}). Use the playbook for hard continuation either way; size for event risk if listed.`;
+    activity.intradayRegime === "protect" ||
+    activity.swingBand === "violent";
 
   const call: "UP" | "DOWN" | null =
     mode === "night" ? (direction === "down" ? "DOWN" : "UP") : null;
+
+  const myTake =
+    mode === "morning"
+      ? [
+          "My Take:",
+          `SOXL is ${direction} about ${signedPct(payload.impact.soxlActualPct)} today (${activity.swingBand} session).`,
+          direction === "down"
+            ? postureHold
+              ? "SELL: only if you can't stomach more volatility."
+              : "SELL: trim if your thesis broke."
+            : postureHold
+              ? "SELL: lock some profit if you want gains off the table."
+              : "SELL: no urgent reason unless overweight.",
+          direction === "down"
+            ? postureHold
+              ? "BUY MORE: wait for selling to slow before averaging down."
+              : "BUY MORE: small add OK with planned dip cash."
+            : postureHold
+              ? "BUY MORE: skip — don't chase a big green spike."
+              : "BUY MORE: wait for a pullback you planned for.",
+          direction === "down"
+            ? "HOLD: reasonable if you expect a semis bounce — chip demand story intact, today may be macro panic."
+            : postureHold
+              ? "HOLD: ride the trend if you're comfortable with 3x swings."
+              : "HOLD: fine default if no action needed before the close.",
+        ].join("\n")
+      : [
+          "My Take:",
+          `Session closed ${direction} (SOXL ${signedPct(payload.impact.soxlActualPct)}).`,
+          direction === "down"
+            ? "SELL: cut or trim if you're done with the drawdown."
+            : "SELL: take profit into strength if you want less exposure.",
+          direction === "down"
+            ? "BUY MORE: average down only with planned cash after the flush slows."
+            : "BUY MORE: usually wait after a strong green close.",
+          call === "UP"
+            ? "HOLD: lean hold overnight — prediction is UP; let a recovery/bounce play out before selling into weakness."
+            : direction === "down"
+              ? "HOLD: only if you believe this is a dip, not a trend change — otherwise prefer SELL."
+              : "HOLD: keep shares if the overnight setup still looks constructive.",
+        ].join("\n");
 
   const predictionSection =
     mode === "night" && call
       ? [
           `${header}: ${call}`,
-          `- swing/risk: ${activity.swingBand} — from |SOXL day| and breadth (fallback heuristic; not LLM).`,
-          `- action plan: Bias ${call === "UP" ? "constructive" : "defensive"} into ${session.dateLabel}; size down if elevated/violent or into event dates. Invalidate if heavyweights (${activity.concentration.leaderTicker ?? "leaders"}) reverse hard at the open.`,
-          `- AH/pre SOXL: ${signedPct(payload.soxl.extendedChangePct)}; sentiment lean=${payload.sentiment.summaryLean}.`,
-          `- key impact names: ${topDrivers}.`,
+          `- swing/risk: ${activity.swingBand} — ${activity.swingBand === "violent" || activity.swingBand === "elevated" ? "big swings; be careful with new buys" : "typical risk day"}.`,
+          `- action plan — SELL: ${call === "UP" ? "trim only if you want profits now; not required if holding for bounce." : "cut or trim if the open keeps flushing."}`,
+          `  BUY MORE: ${call === "UP" ? "optional small add on a dip if you have cash; not required." : "average down only if flush slows and you have planned cash."}`,
+          `  HOLD: ${call === "UP" ? "primary lean — keep shares for expected recovery/bounce into next session." : "only if you still believe long-term; otherwise SELL may be cleaner."}`,
+          `- AH/pre SOXL: ${signedPct(payload.soxl.extendedChangePct)}; sentiment=${payload.sentiment.summaryLean}; watch ${topDrivers}.`,
         ].join("\n")
       : "";
 
