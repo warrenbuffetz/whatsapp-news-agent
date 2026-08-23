@@ -9,7 +9,7 @@ const CONTINUATION_HEADER_BUDGET = CONTINUATION_HEADER.length + 2;
 const TICKER_BLURB_RE =
   /^([A-Z][A-Z0-9.]{0,4}) \(P\/E: (.+?)\) (.+)$/;
 const SECTION_START_RE =
-  /^(Day update|Nightly update|Why is SOXL |SOXL overnight|Info|Main story:|Impact \(est\. SOXL contribution\)|No News to Mention:|Other Stats|My Take:|Tomorrow's prediction:|Next week's prediction on open:|Prediction:|What to do|Momentum playbook|Event risk|Night call log)/;
+  /^(Day update|Nightly update|Why is SOXL |Overnight & pre-market|SOXL overnight|Info|Main story:|Impact \(est\. SOXL contribution\)|No News to Mention:|Other Stats|My Take:|Tomorrow's prediction:|Next week's prediction on open:|Prediction:|Your move:|Event risk|Night call log)/;
 
 function getSoXlBotToken(): string {
   const botToken = process.env.TELEGRAM_SOXL_BOT_TOKEN?.trim();
@@ -231,7 +231,7 @@ export function formatTelegramHtml(text: string): string {
 
     if (inImpact) {
       if (
-        /^(Other Stats|My Take:|Tomorrow's prediction:|Next week's prediction on open:|Prediction:|No News to Mention:|Info|Main story:|What to do|Momentum playbook|Company updates)/.test(
+      /^(Other Stats|My Take:|Tomorrow's prediction:|Next week's prediction on open:|Prediction:|No News to Mention:|Info|Main story:|Your move:|Company updates)/.test(
           line,
         )
       ) {
@@ -245,7 +245,7 @@ export function formatTelegramHtml(text: string): string {
 
     if (
       (i === contentStart || (contentStart === 1 && i === 1)) &&
-      /^(Day update|Nightly update|Why is SOXL |SOXL overnight)/.test(line)
+      /^(Day update|Nightly update|Why is SOXL |Overnight & pre-market|SOXL overnight)/.test(line)
     ) {
       out.push(`<b>${line}</b>`);
       continue;
@@ -258,10 +258,16 @@ export function formatTelegramHtml(text: string): string {
     }
 
     const headerMatch = line.match(
-      /^(Main story:|My Take:|No News to Mention:|Other Stats|Info|Momentum playbook|What to do)(.*)$/,
+      /^(Main story:|My Take:|No News to Mention:|Other Stats|Info|Your move:)(.*)$/,
     );
     if (headerMatch) {
       out.push(`<b>${headerMatch[1]}</b>${headerMatch[2]}`);
+      continue;
+    }
+
+    const yourMoveMatch = line.match(/^Your move:\s*(SELL|BUY MORE|HOLD)(.*)$/);
+    if (yourMoveMatch) {
+      out.push(`<b>Your move:</b> ${yourMoveMatch[1]}${yourMoveMatch[2]}`);
       continue;
     }
 

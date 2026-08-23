@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateCoachMessage } from "@/lib/run-club/coach";
+import { isRunClubEnabled } from "@/lib/run-club/feature";
 import { sendTelegramMessage } from "@/lib/run-club/telegram";
 import { fetchRunWeather } from "@/lib/run-club/weather";
 
@@ -39,6 +40,13 @@ function getEasternDayOfWeek(): number {
  * Triggered by Vercel Cron Tue/Thu/Sat 6:00 AM Eastern (10:00 UTC during EDT).
  */
 export async function GET(request: NextRequest) {
+  if (!isRunClubEnabled()) {
+    return NextResponse.json(
+      { ok: true, enabled: false, skipped: true },
+      { status: 404 },
+    );
+  }
+
   if (process.env.NODE_ENV === "production") {
     const cronSecret = process.env.CRON_SECRET;
 

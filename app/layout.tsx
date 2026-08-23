@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Market & Run Agents",
+  title: "SOXL Brief Agent",
   description:
-    "SOXL day/night action briefs with impact playbooks, next-session calls, call log, and Gemini API fallback — plus Toronto run-club coaching",
+    "SOXL day/night action briefs with impact table, next-session prediction, call log, and Gemini API fallback",
 };
 
 export default function RootLayout({

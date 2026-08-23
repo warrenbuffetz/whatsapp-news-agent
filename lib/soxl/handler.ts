@@ -74,12 +74,16 @@ export async function handleSoXlCron(
       call: brief.call ?? null,
       callLogRecorded: brief.callLogRecorded ?? false,
       usedFallback: brief.usedFallback ?? false,
+      recommendedAction: brief.recommendedAction ?? null,
+      recommendedReason: brief.recommendedReason ?? null,
+      majorityTickers: brief.majorityTickers ?? [],
+      majorityWeightPct: brief.majorityWeightPct ?? null,
       dataQuality: brief.dataQuality ?? null,
       hasPrediction:
         /(?:Tomorrow's prediction|Next week's prediction on open|Prediction):\s*(UP|DOWN)/i.test(
           brief.text,
         ),
-      hasPlaybook: /What to do|Momentum playbook/i.test(brief.text),
+      hasYourMove: /Your move:/i.test(brief.text),
     });
   } catch (error) {
     console.error("[soxl]", error);

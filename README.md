@@ -3,7 +3,7 @@
 Serverless apartments on Next.js (Vercel):
 
 1. **SOXL carbon-copy brief** — WhatsApp on-demand + Telegram morning/night cron  
-2. **Run club coach** — Telegram cron (Tue/Thu/Sat)
+2. **Run club coach** *(optional)* — Telegram cron (Tue/Thu/Sat); set `RUN_CLUB_ENABLED=true`
 
 ## SOXL architecture
 
@@ -13,7 +13,7 @@ Cron (weekday)
   → GET /api/soxl/night    (5:00 PM ET / 21:00 UTC EDT)
   → Live iShares SOXX holdings + Yahoo/Nasdaq quotes
   → Finnhub (VIX / P/E / shares / ticker news) + optional TheNewsAPI macro + Reddit
-  → Gemini 2.5 Flash (morning = why up/down; night = wrap + UP/DOWN prediction)
+  → Gemini 2.5 Flash (morning = overnight/pre-market + open action; night = wrap + UP/DOWN prediction + one action)
   → Dedicated SOXL Telegram bot/group (HTML-formatted)
 
 WhatsApp
@@ -26,9 +26,10 @@ WhatsApp
 
 | Path | Schedule | Meaning (EDT) |
 |------|----------|---------------|
-| `/api/run-club` | `0 10 * * 2,4,6` | Tue/Thu/Sat 6:00 AM ET |
 | `/api/soxl/morning` | `0 11 * * 1-5` | Weekdays 7:00 AM ET |
 | `/api/soxl/night` | `0 21 * * 1-5` | Weekdays 5:00 PM ET |
+
+Run club cron is **not** registered by default. To restore: set `RUN_CLUB_ENABLED=true` and add `{ "path": "/api/run-club", "schedule": "0 10 * * 2,4,6" }` to `vercel.json` crons.
 
 When EST returns (UTC-5), shift UTC hours +1 if you want to keep wall-clock ET times.
 
@@ -56,7 +57,7 @@ Vercel sends `Authorization: Bearer $CRON_SECRET`. Set `CRON_SECRET` in the Verc
 
 ### Telegram
 
-**Run-club** uses `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`.
+**Run-club** uses `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`. Off by default — set `RUN_CLUB_ENABLED=true` in Vercel to turn the coach back on.
 
 **SOXL** uses a **dedicated** bot and group (no fallback to run-club):
 
@@ -85,8 +86,9 @@ curl "https://api.telegram.org/bot<TELEGRAM_SOXL_BOT_TOKEN>/getUpdates"
 Holdings are fetched daily (iShares CSV → StockAnalysis via Jina → static JSON fallback). Quotes use Yahoo spark with Nasdaq fallback, then Finnhub fills VIX / ETF metrics. Ticker news comes from Finnhub; TheNewsAPI is at most one macro call. Missing stats are omitted (not printed as “not available”). Reddit may 403; the brief still runs.
 
 **Brief modes**
-- Morning: why SOXL is up/down (momentum) — no prediction
-- Night: full carbon-copy wrap + `Prediction: UP|DOWN`
+- Morning: overnight/pre-market analysis + one action at the open — no prediction
+- Night: session wrap + next-day UP/DOWN prediction + one action for tomorrow
+- Coverage: majority-weight SOXX holdings only (~50% cumulative weight)
 
 
 ## Deploy (Vercel)

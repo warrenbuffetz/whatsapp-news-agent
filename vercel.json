@@ -4,10 +4,6 @@
   "buildCommand": "npm run build",
   "crons": [
     {
-      "path": "/api/run-club",
-      "schedule": "0 10 * * 2,4,6"
-    },
-    {
       "path": "/api/soxl/morning",
       "schedule": "0 11 * * 1-5"
     },

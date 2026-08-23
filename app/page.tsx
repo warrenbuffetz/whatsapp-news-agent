@@ -1,4 +1,8 @@
+import { isRunClubEnabled } from "@/lib/run-club/feature";
+
 export default function Home() {
+  const runClubEnabled = isRunClubEnabled();
+
   return (
     <main
       style={{
@@ -10,11 +14,12 @@ export default function Home() {
       }}
     >
       <h1 style={{ fontSize: "1.75rem", marginBottom: "0.5rem" }}>
-        Market &amp; Run Agents
+        {runClubEnabled ? "Market & Run Agents" : "SOXL Brief Agent"}
       </h1>
       <p style={{ marginTop: 0, color: "#444" }}>
-        One Vercel deployment, two products. WhatsApp and Telegram deliver the
-        same SOXL brief — not separate brief types.
+        {runClubEnabled
+          ? "One Vercel deployment, two products. WhatsApp and Telegram deliver the same SOXL brief — not separate brief types."
+          : "WhatsApp and Telegram deliver the SOXL semiconductor brief."}
       </p>
 
       <section style={{ marginTop: "2rem" }}>
@@ -63,21 +68,24 @@ export default function Home() {
         </ul>
       </section>
 
-      <section style={{ marginTop: "1.75rem" }}>
-        <h2 style={{ fontSize: "1.15rem", marginBottom: "0.35rem" }}>
-          Run Club Coach
-        </h2>
-        <p style={{ marginTop: 0 }}>
-          Anti-excuse Toronto running dial — weather-based gear call and hype
-          for the day&apos;s workout. Separate Telegram bot and chat from SOXL.
-        </p>
-        <ul style={{ paddingLeft: "1.25rem" }}>
-          <li>
-            <strong>Telegram</strong> — Tue / Thu / Sat at 6 AM ET via{" "}
-            <code>/api/run-club</code>
-          </li>
-        </ul>
-      </section>
+      {runClubEnabled ? (
+        <section style={{ marginTop: "1.75rem" }}>
+          <h2 style={{ fontSize: "1.15rem", marginBottom: "0.35rem" }}>
+            Run Club Coach
+          </h2>
+          <p style={{ marginTop: 0 }}>
+            Anti-excuse Toronto running dial — weather-based gear call and hype
+            for the day&apos;s workout. Separate Telegram bot and chat from
+            SOXL.
+          </p>
+          <ul style={{ paddingLeft: "1.25rem" }}>
+            <li>
+              <strong>Telegram</strong> — Tue / Thu / Sat at 6 AM ET via{" "}
+              <code>/api/run-club</code>
+            </li>
+          </ul>
+        </section>
+      ) : null}
 
       <p style={{ marginTop: "2.5rem", fontSize: "0.9rem", color: "#666" }}>
         Status: API routes are live. Configure{" "}

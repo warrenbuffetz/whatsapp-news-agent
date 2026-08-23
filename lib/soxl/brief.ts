@@ -20,7 +20,11 @@ import {
   formatSessionActivityBlock,
   type SessionActivity,
 } from "@/lib/soxl/session-activity";
-import { formatMomentumPlaybook } from "@/lib/soxl/playbook";
+import {
+  formatYourMoveBlock,
+  recommendSingleAction,
+  type SoXlAction,
+} from "@/lib/soxl/recommendation";
 import { formatEventsBlock, type MarketEvent } from "@/lib/soxl/events";
 import { formatCallLogBlock, type CallLogEntry } from "@/lib/soxl/call-log";
 import {
@@ -45,8 +49,8 @@ const BLURB_RULES = `Company blurbs (critical — Reddit carbon-copy style):
 
 const RETAIL_ACTION_RULES = `Retail investor audience (critical):
 - Reader ALREADY OWNS SOXL — this tracker is for managing an existing position.
-- Three actions to recommend: SELL (trim or exit) | BUY MORE (average down) | HOLD (keep shares, ride a expected bounce/recovery).
-- Recommend HOLD when the brief or prediction leans UP / recovery after a dip, or when selling into panic looks worse than waiting — say why in plain English.
+- Exactly ONE action per brief — never list SELL / BUY MORE / HOLD alternatives.
+- A code block appends "Your move: {ACTION}" — your My Take must echo that same action with one sentence why (do not contradict it).
 - No options, hedging, margin, shorting, or trader jargon.
 - SOXL is 3x leveraged — remind them on large moves. BUY MORE = planned dip cash only, not panic buying.`;
 
@@ -60,39 +64,34 @@ ${BLURB_RULES}
 - Keep the whole brief under 3500 characters if possible; prioritize Main story, impact names, My Take.
 - Do NOT add any EOY price target footer.`;
 
-const MORNING_SYSTEM_PROMPT = `You are writing a Reddit-style SOXL semiconductor ETF INTRADAY brief. Goal: help the reader understand what is happening DURING the trading day and whether any activity warrants shifting investing strategy BEFORE the close (EOD).
+const MORNING_SYSTEM_PROMPT = `You are writing a Reddit-style SOXL semiconductor ETF MORNING brief. Goal: overnight / pre-market analysis and one clear action at the open for someone who already owns SOXL.
 
 STRICT FORMAT — use these section headers and order:
 
 1) First line MUST be exactly: "Day update — {M/D/YYYY}"
-2) Second line title: "Why is SOXL {up|down|flat} today?"
-   (If clearly pre-open with only overnight cues, you may use "SOXL overnight / open prep" instead.)
+2) Second line title: "Overnight & pre-market — {M/D/YYYY}"
 
-3) "Info" then "Main story:" — one tight paragraph on today's intraday momentum: macro + semis narrative and which heavy SOXX weights are driving SOXL right now. Mention concentration / single-name risk if provided.
+3) "Info" then "Main story:" — one tight paragraph on overnight/AH/pre-market SOXL & SOXX moves, macro headlines, futures/gap context, and events today (from provided event list). Focus on what matters INTO THE OPEN — not an intraday session recap.
 
-4) Company blurbs for the coverage names provided (see blurb rules).
+4) Company blurbs for the coverage names provided (majority-weight SOXX names only — see blurb rules).
 
-5) "No News to Mention:" comma-separated tickers from the provided no-news list.
+5) "No News to Mention:" comma-separated tickers from the provided no-news list (majority-weight names only).
 
 6) Paste the IMPACT block exactly as provided.
 
 7) Paste the OTHER STATS block exactly as provided (may be short).
 
 8) "My Take:" — plain English for someone who already owns SOXL. MUST include:
-   (a) What happened today in one simple sentence (up/down and why, briefly).
-   (b) Three labeled lines — use these headers exactly:
-       "SELL:" when trimming/exiting makes sense (or "SELL: no strong reason today").
-       "BUY MORE:" when averaging down makes sense (or "BUY MORE: wait" if knife-catching / huge spike).
-       "HOLD:" when keeping shares for an expected bounce/recovery is the best fit — especially if semis look oversold or news supports a rebound. Say why.
-   (c) If intraday_regime is protect or dont_chase, lean away from buying more into a huge move.
+   (a) One sentence on overnight/pre-market setup (gap, AH move, macro).
+   (b) One sentence echoing the code-provided action: "Your move: {ACTION}" — explain why that ONE action fits at the open. Do NOT list other options.
 
 9) Do NOT include any next-session prediction. No "Tomorrow's prediction", "Next week's prediction", or "Prediction: UP/DOWN".
-10) Do NOT invent a "What to do" / "Momentum playbook" section — it will be appended in code.
+10) Do NOT invent a "Your move:" block — it will be appended in code after My Take.
 
 ${SHARED_RULES}`;
 
 function nightSystemPrompt(header: string): string {
-  return `You are writing a Reddit-style SOXL semiconductor ETF END-OF-DAY brief. Goal: wrap the session AND give a concrete ACTION PLAN for the next business trading session.
+  return `You are writing a Reddit-style SOXL semiconductor ETF END-OF-DAY brief. Goal: wrap the session, predict the next business trading session UP or DOWN, and set context for one action tomorrow.
 
 STRICT FORMAT — use these section headers and order:
 
@@ -101,28 +100,24 @@ STRICT FORMAT — use these section headers and order:
 
 3) "Info" then "Main story:" — one tight paragraph on the macro + semis narrative and today's full session. Note relative strength vs SOXX/SMH/QQQ and concentration if single-name risk.
 
-4) Company blurbs for the coverage names provided (see blurb rules).
+4) Company blurbs for the coverage names provided (majority-weight SOXX names only — see blurb rules).
 
-5) "No News to Mention:" comma-separated tickers from the provided no-news list.
+5) "No News to Mention:" comma-separated tickers from the provided no-news list (majority-weight names only).
 
 6) Paste the IMPACT block exactly as provided.
 
 7) Paste the OTHER STATS block exactly as provided (may be short).
 
-8) "My Take:" — plain English for someone who already owns SOXL. Session summary plus:
-   "SELL:" …
-   "BUY MORE:" …
-   "HOLD:" … (keep shares for bounce/recovery when prediction or tape supports it)
+8) "My Take:" — plain English session summary for someone who already owns SOXL. One or two sentences only — no SELL/BUY MORE/HOLD list (action comes from code).
 
 9) REQUIRED ending — use this EXACT header line (do not invent a different label):
    "${header}: UP" or "${header}: DOWN"
    then these bullets in order:
    - swing/risk: calm|normal|elevated|violent — one plain sentence
-   - action plan: three sub-lines — "SELL:", "BUY MORE:", and "HOLD:" for the next session. If prediction is UP after a down day, HOLD should often be the lead option (ride recovery). If DOWN, be honest about SELL vs HOLD vs small BUY MORE on flush.
-   - 2–3 short bullets: after-hours move if any, sentiment lean, which chip names mattered today
+   - 2–3 short bullets: after-hours move if any, sentiment lean, which majority-weight chip names mattered today
 
 Do NOT use a bare "Prediction:" header. Always use "${header}:".
-Do NOT invent a "What to do" / "Momentum playbook" section — it will be appended in code.
+Do NOT invent a "Your move:" block — it will be appended in code after the prediction section.
 
 ${SHARED_RULES}`;
 }
@@ -247,6 +242,8 @@ export interface BriefPayload {
   callLogEntries?: CallLogEntry[];
   holdingsAsOf: string | null;
   holdingsSource: "ishares" | "stockanalysis" | "fallback";
+  majorityTickers: string[];
+  majorityWeightPct: number;
 }
 
 export interface BriefGenerationMeta {
@@ -256,6 +253,10 @@ export interface BriefGenerationMeta {
   nextSessionKind: NextSessionKind;
   nextSessionIso: string;
   call: "UP" | "DOWN" | null;
+  recommendedAction: SoXlAction;
+  recommendedReason: string;
+  majorityTickers: string[];
+  majorityWeightPct: number;
   /** True when Gemini failed and a code-only brief was used. */
   usedFallback: boolean;
 }
@@ -282,10 +283,8 @@ export async function generateSoXlBrief(
   );
 
   const tiers = assignImpactTiers(payload.impact);
-  const relevantTickers = new Set(
-    payload.tickerNews.filter((n) => n.relevant && n.headline).map((n) => n.ticker),
-  );
-  const coverage = pickCoverageTickers(payload.impact, relevantTickers);
+  const majorityTickers = payload.majorityTickers;
+  const coverage = pickCoverageTickers(payload.impact, majorityTickers);
   const newsByTicker = new Map(
     payload.tickerNews.map((n) => [n.ticker, n]),
   );
@@ -316,11 +315,15 @@ export async function generateSoXlBrief(
     )
     .join("\n");
 
-  const noNewsTickers = payload.impact.rows
-    .map((r) => r.ticker)
-    .filter((t) => !coverage.includes(t));
+  const noNewsTickers = majorityTickers.filter((t) => {
+    const news = newsByTicker.get(t);
+    return !news?.relevant || !news.headline;
+  });
 
-  const impactBlock = formatImpactTable(payload.impact);
+  const impactBlock = formatImpactTable(payload.impact, {
+    tickers: majorityTickers,
+    majorityWeightPct: payload.majorityWeightPct,
+  });
   const otherStats = formatOtherStats({
     soxl: payload.soxl,
     soxx: payload.soxx,
@@ -330,10 +333,18 @@ export async function generateSoXlBrief(
   const eventsBlock = formatEventsBlock(payload.events ?? []);
   const callLogBlock = formatCallLogBlock(payload.callLogEntries ?? []);
 
+  const morningRecommendation = recommendSingleAction({
+    mode,
+    activity,
+    direction: payload.impact.direction,
+    prediction: null,
+    soxlExtendedPct: payload.soxl.extendedChangePct,
+  });
+
   const predictionInstruction =
     mode === "night"
-      ? `End with "${header}: UP" or "${header}: DOWN" (next session kind=${sessionKind}, opens ${sessionDate}), then swing/risk and action plan with "SELL:", "BUY MORE:", and "HOLD:" for an existing holder. If UP after a red day, favor HOLD (bounce/recovery). Suggested swing_band=${activity.swingBand}.`
-      : `Do NOT include any next-session prediction section. Intraday regime=${activity.intradayRegime} — My Take must use "SELL:", "BUY MORE:", and "HOLD:" (reader already owns SOXL; HOLD when recovery/bounce likely).`;
+      ? `End with "${header}: UP" or "${header}: DOWN" (next session kind=${sessionKind}, opens ${sessionDate}), then swing/risk and 2–3 supporting bullets (AH, sentiment, key majority names). No action plan — code appends "Your move:". Suggested swing_band=${activity.swingBand}.`
+      : `Do NOT include any next-session prediction section. My Take MUST echo this exact code action with one sentence why: Your move: ${morningRecommendation.action === "BUY_MORE" ? "BUY MORE" : morningRecommendation.action}. Overnight/pre-market focus only; intraday_regime=${activity.intradayRegime}.`;
 
   const sessionBlock = `\n${formatSessionActivityBlock(activity)}\n\n${eventsBlock}\n\n${callLogBlock}\n`;
 
@@ -348,6 +359,7 @@ VIX: ${payload.vix.price ?? "omitted"}
 SOXX holdings source: ${payload.holdingsSource}
 SOXX holdings as-of: ${payload.holdingsAsOf ?? "unknown"}
 Holdings count: ${payload.impact.rows.length}
+Majority coverage: ${majorityTickers.join(", ")} (~${payload.majorityWeightPct}% SOXX weight)
 Intraday regime: ${activity.intradayRegime}
 Concentration top3%: ${activity.concentration.top3SharePct}
 Single-name risk: ${activity.concentration.singleNameRisk ? activity.concentration.leaderTicker : "no"}
@@ -414,18 +426,18 @@ Write the full brief now. No EOY footer. Do not echo section labels like "IMPACT
         "[soxl/brief] Gemini unavailable — using code-only fallback brief",
         error instanceof Error ? error.message : error,
       );
-      const fb = buildFallbackBrief(payload, activity, header, session, mode, date);
+      const fb = buildFallbackBrief(
+        payload,
+        activity,
+        header,
+        session,
+        mode,
+        date,
+      );
       return { ...fb, usedFallback: true };
     }
     throw error;
   }
-
-  const playbook = formatMomentumPlaybook({
-    mode,
-    activity,
-    soxl: payload.soxl,
-  });
-  cleaned = `${cleaned}\n\n${playbook}`;
 
   const callMatch = cleaned.match(
     /(?:Tomorrow's prediction|Next week's prediction on open|Prediction):\s*(UP|DOWN)/i,
@@ -434,6 +446,16 @@ Write the full brief now. No EOY footer. Do not echo section labels like "IMPACT
     ? (callMatch[1].toUpperCase() as "UP" | "DOWN")
     : null;
 
+  const finalRecommendation = recommendSingleAction({
+    mode,
+    activity,
+    direction: payload.impact.direction,
+    prediction: mode === "night" ? call : null,
+    soxlExtendedPct: payload.soxl.extendedChangePct,
+  });
+
+  cleaned = `${cleaned}\n\n${formatYourMoveBlock(finalRecommendation)}`;
+
   return {
     text: cleaned,
     activity,
@@ -441,6 +463,10 @@ Write the full brief now. No EOY footer. Do not echo section labels like "IMPACT
     nextSessionKind: sessionKind,
     nextSessionIso: session.iso,
     call: mode === "night" ? call : null,
+    recommendedAction: finalRecommendation.action,
+    recommendedReason: finalRecommendation.reason,
+    majorityTickers,
+    majorityWeightPct: payload.majorityWeightPct,
     usedFallback,
   };
 }
@@ -462,13 +488,9 @@ function buildFallbackBrief(
   date: string,
 ): Omit<BriefGenerationMeta, "usedFallback"> {
   const direction = payload.impact.direction;
+  const majorityTickers = payload.majorityTickers;
   const tiers = assignImpactTiers(payload.impact);
-  const relevant = new Set(
-    payload.tickerNews
-      .filter((n) => n.relevant && n.headline)
-      .map((n) => n.ticker),
-  );
-  const coverage = pickCoverageTickers(payload.impact, relevant);
+  const coverage = pickCoverageTickers(payload.impact, majorityTickers);
   const newsByTicker = new Map(payload.tickerNews.map((n) => [n.ticker, n]));
 
   const blurbs = coverage.map((ticker) => {
@@ -485,69 +507,64 @@ function buildFallbackBrief(
     return `${ticker} (P/E: ${pe}) No new company-specific news found since yesterday; ${name} was ${role}.`;
   });
 
-  const noNews = payload.impact.rows
-    .map((r) => r.ticker)
-    .filter((t) => !coverage.includes(t))
+  const noNews = majorityTickers
+    .filter((t) => {
+      const news = newsByTicker.get(t);
+      return !news?.relevant || !news.headline;
+    })
     .join(", ");
 
   const topDrivers = activity.concentration.top3Tickers.join(", ") || "n/a";
-  const mainStory = [
-    `SOXL is ${direction} today (${signedPct(payload.impact.soxlActualPct)}) vs SOXX ${signedPct(payload.impact.soxxActualPct)}.`,
-    `Top impact concentration: ${activity.concentration.top3SharePct}% in ${topDrivers}${activity.concentration.singleNameRisk ? ` (single-name risk: ${activity.concentration.leaderTicker})` : ""}.`,
-    `Relative: ${activity.relative.summaryLine}.`,
-    payload.macroNews[0]
-      ? `Macro cue: ${payload.macroNews[0].title}.`
-      : "No primary macro headline loaded.",
-    "Gemini narrative unavailable (quota/rate-limit) — data-only fallback brief.",
-  ].join(" ");
+  const ahPct = signedPct(payload.soxl.extendedChangePct);
 
-  const postureHold =
-    activity.intradayRegime === "dont_chase" ||
-    activity.intradayRegime === "protect" ||
-    activity.swingBand === "violent";
+  const mainStory =
+    mode === "morning"
+      ? [
+          `Overnight/pre-market: SOXL AH/pre ${ahPct}, SOXX ${signedPct(payload.soxx.extendedChangePct)}.`,
+          `Prior session: SOXL ${signedPct(payload.impact.soxlActualPct)} vs SOXX ${signedPct(payload.impact.soxxActualPct)}.`,
+          `Top majority-weight drivers: ${topDrivers}${activity.concentration.singleNameRisk ? ` (single-name risk: ${activity.concentration.leaderTicker})` : ""}.`,
+          payload.macroNews[0]
+            ? `Macro cue: ${payload.macroNews[0].title}.`
+            : "No primary macro headline loaded.",
+          "Gemini narrative unavailable (quota/rate-limit) — data-only fallback brief.",
+        ].join(" ")
+      : [
+          `SOXL closed ${direction} (${signedPct(payload.impact.soxlActualPct)}) vs SOXX ${signedPct(payload.impact.soxxActualPct)}.`,
+          `Top impact concentration: ${activity.concentration.top3SharePct}% in ${topDrivers}${activity.concentration.singleNameRisk ? ` (single-name risk: ${activity.concentration.leaderTicker})` : ""}.`,
+          `Relative: ${activity.relative.summaryLine}.`,
+          payload.macroNews[0]
+            ? `Macro cue: ${payload.macroNews[0].title}.`
+            : "No primary macro headline loaded.",
+          "Gemini narrative unavailable (quota/rate-limit) — data-only fallback brief.",
+        ].join(" ");
 
   const call: "UP" | "DOWN" | null =
     mode === "night" ? (direction === "down" ? "DOWN" : "UP") : null;
+
+  const finalRecommendation = recommendSingleAction({
+    mode,
+    activity,
+    direction,
+    prediction: call,
+    soxlExtendedPct: payload.soxl.extendedChangePct,
+  });
+
+  const actionLabel =
+    finalRecommendation.action === "BUY_MORE"
+      ? "BUY MORE"
+      : finalRecommendation.action;
 
   const myTake =
     mode === "morning"
       ? [
           "My Take:",
-          `SOXL is ${direction} about ${signedPct(payload.impact.soxlActualPct)} today (${activity.swingBand} session).`,
-          direction === "down"
-            ? postureHold
-              ? "SELL: only if you can't stomach more volatility."
-              : "SELL: trim if your thesis broke."
-            : postureHold
-              ? "SELL: lock some profit if you want gains off the table."
-              : "SELL: no urgent reason unless overweight.",
-          direction === "down"
-            ? postureHold
-              ? "BUY MORE: wait for selling to slow before averaging down."
-              : "BUY MORE: small add OK with planned dip cash."
-            : postureHold
-              ? "BUY MORE: skip — don't chase a big green spike."
-              : "BUY MORE: wait for a pullback you planned for.",
-          direction === "down"
-            ? "HOLD: reasonable if you expect a semis bounce — chip demand story intact, today may be macro panic."
-            : postureHold
-              ? "HOLD: ride the trend if you're comfortable with 3x swings."
-              : "HOLD: fine default if no action needed before the close.",
+          `Overnight/pre-market SOXL is ${ahPct}; gap and macro set the tone into the open (${activity.swingBand} swing band).`,
+          `Your move: ${actionLabel} — ${finalRecommendation.reason}`,
         ].join("\n")
       : [
           "My Take:",
           `Session closed ${direction} (SOXL ${signedPct(payload.impact.soxlActualPct)}).`,
-          direction === "down"
-            ? "SELL: cut or trim if you're done with the drawdown."
-            : "SELL: take profit into strength if you want less exposure.",
-          direction === "down"
-            ? "BUY MORE: average down only with planned cash after the flush slows."
-            : "BUY MORE: usually wait after a strong green close.",
-          call === "UP"
-            ? "HOLD: lean hold overnight — prediction is UP; let a recovery/bounce play out before selling into weakness."
-            : direction === "down"
-              ? "HOLD: only if you believe this is a dip, not a trend change — otherwise prefer SELL."
-              : "HOLD: keep shares if the overnight setup still looks constructive.",
+          `Your move: ${actionLabel} — ${finalRecommendation.reason}`,
         ].join("\n");
 
   const predictionSection =
@@ -555,16 +572,18 @@ function buildFallbackBrief(
       ? [
           `${header}: ${call}`,
           `- swing/risk: ${activity.swingBand} — ${activity.swingBand === "violent" || activity.swingBand === "elevated" ? "big swings; be careful with new buys" : "typical risk day"}.`,
-          `- action plan — SELL: ${call === "UP" ? "trim only if you want profits now; not required if holding for bounce." : "cut or trim if the open keeps flushing."}`,
-          `  BUY MORE: ${call === "UP" ? "optional small add on a dip if you have cash; not required." : "average down only if flush slows and you have planned cash."}`,
-          `  HOLD: ${call === "UP" ? "primary lean — keep shares for expected recovery/bounce into next session." : "only if you still believe long-term; otherwise SELL may be cleaner."}`,
           `- AH/pre SOXL: ${signedPct(payload.soxl.extendedChangePct)}; sentiment=${payload.sentiment.summaryLean}; watch ${topDrivers}.`,
         ].join("\n")
       : "";
 
+  const titleLine =
+    mode === "morning"
+      ? `Overnight & pre-market — ${date}`
+      : `Why is SOXL ${direction} today?`;
+
   let text = [
     mode === "morning" ? `Day update — ${date}` : `Nightly update — ${date}`,
-    `Why is SOXL ${direction} today?`,
+    titleLine,
     "",
     "Info",
     `Main story: ${mainStory}`,
@@ -573,7 +592,10 @@ function buildFallbackBrief(
     "",
     `No News to Mention: ${noNews || "(none)"}`,
     "",
-    formatImpactTable(payload.impact),
+    formatImpactTable(payload.impact, {
+      tickers: majorityTickers,
+      majorityWeightPct: payload.majorityWeightPct,
+    }),
     "",
     formatOtherStats({
       soxl: payload.soxl,
@@ -588,7 +610,7 @@ function buildFallbackBrief(
     "",
     formatCallLogBlock(payload.callLogEntries ?? []),
     "",
-    formatMomentumPlaybook({ mode, activity, soxl: payload.soxl }),
+    formatYourMoveBlock(finalRecommendation),
   ]
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
@@ -606,6 +628,10 @@ function buildFallbackBrief(
     nextSessionKind: session.kind,
     nextSessionIso: session.iso,
     call,
+    recommendedAction: finalRecommendation.action,
+    recommendedReason: finalRecommendation.reason,
+    majorityTickers,
+    majorityWeightPct: payload.majorityWeightPct,
   };
 }
 
@@ -616,6 +642,7 @@ export function truncateForWhatsApp(full: string, max = 1400): string {
   const keepHeaders = [
     "Main story:",
     "My Take:",
+    "Your move:",
     "Tomorrow's prediction:",
     "Next week's prediction on open:",
     "Prediction:",

@@ -7,6 +7,7 @@ import { fetchFundamentals } from "@/lib/soxl/fundamentals";
 import {
   buildImpactReport,
   pickCoverageCandidates,
+  pickMajorityWeightHoldings,
 } from "@/lib/soxl/impact";
 import { fetchMacroNews, fetchTickerNewsFor } from "@/lib/soxl/news";
 import { fetchMarketQuotes } from "@/lib/soxl/quotes";
@@ -19,6 +20,7 @@ import {
   resolvePendingCalls,
 } from "@/lib/soxl/call-log";
 import { todayEtIso } from "@/lib/soxl/market-calendar";
+import type { SoXlAction } from "@/lib/soxl/recommendation";
 import type { SessionActivity } from "@/lib/soxl/session-activity";
 import {
   buildQuoteCoverage,
@@ -42,6 +44,10 @@ export interface SoXlBriefResult {
   call?: "UP" | "DOWN" | null;
   callLogRecorded?: boolean;
   usedFallback?: boolean;
+  recommendedAction?: SoXlAction;
+  recommendedReason?: string;
+  majorityTickers?: string[];
+  majorityWeightPct?: number;
   dataQuality?: DataQualityReport;
 }
 
@@ -90,7 +96,8 @@ export async function buildSoXlBrief(
     console.warn("[soxl] resolvePendingCalls", error);
   }
 
-  const candidates = pickCoverageCandidates(impact);
+  const majority = pickMajorityWeightHoldings(holdings);
+  const candidates = pickCoverageCandidates(majority.tickers);
   const focusHoldings = holdings.filter((h) => candidates.includes(h.ticker));
 
   // Fundamentals after news to reduce Finnhub burst overlap.
@@ -113,6 +120,8 @@ export async function buildSoXlBrief(
     callLogEntries,
     holdingsAsOf: holdingsResult.asOf,
     holdingsSource: holdingsResult.source,
+    majorityTickers: majority.tickers,
+    majorityWeightPct: majority.cumulativeWeightPct,
   });
 
   let callLogRecorded = false;
@@ -178,6 +187,10 @@ export async function buildSoXlBrief(
     call: generated.call,
     callLogRecorded,
     usedFallback: generated.usedFallback,
+    recommendedAction: generated.recommendedAction,
+    recommendedReason: generated.recommendedReason,
+    majorityTickers: generated.majorityTickers,
+    majorityWeightPct: generated.majorityWeightPct,
     dataQuality,
   };
 }

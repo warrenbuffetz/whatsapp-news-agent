@@ -212,7 +212,7 @@ Swing: ${activity.swingBand} (calm=small move, violent=huge move — be careful 
 Intraday (day brief): ${activity.intradayRegime} (dont_chase/protect = do not buy more into a big move today)
 Concentration: top3=${activity.concentration.top3SharePct}% (${activity.concentration.top3Tickers.join(", ")})${activity.concentration.singleNameRisk ? ` — one stock (${activity.concentration.leaderTicker}) driving much of the move` : ""}
 Relative: ${activity.relative.summaryLine}
-Retail framing: reader already owns SOXL. Recommend SELL, BUY MORE (average down), or HOLD (keep shares for bounce/recovery — especially when prediction is UP).`;
+Retail framing: reader already owns SOXL. Code appends exactly one "Your move:" action — do not list alternatives.`;
 }
 
 /** Top impact rows by |soxlImpact| for playbook context. */
